@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -16,7 +17,10 @@ import (
 
 // listGCSBuckets lists all buckets in a GCP project
 func listGCSBuckets(ctx context.Context, projectID string) (fs.DirStream, syscall.Errno) {
+	start := time.Now()
 	buckets, err := storagepkg.ListBuckets(ctx, projectID)
+	logGCS("ListBuckets", start, projectID, len(buckets), "buckets")
+
 	if err != nil {
 		return nil, MapGCPError(err)
 	}
@@ -46,6 +50,7 @@ var _ fs.NodeLookuper = (*BucketNode)(nil)
 
 // Readdir lists objects and prefixes in the bucket
 func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
 	if err != nil {
 		return nil, MapGCPError(err)
@@ -104,6 +109,7 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 		}
 	}
 
+	logGCS("ListObjects", start, n.bucketName, n.prefix, len(entries)-1, "objects") // -1 for .meta dir
 	return fs.NewListDirStream(entries), 0
 }
 
@@ -118,6 +124,8 @@ func (n *BucketNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 // Lookup finds a child node by name (object or prefix)
 func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	start := time.Now()
+
 	// Handle .meta directory
 	if name == ".meta" {
 		stable := fs.StableAttr{
@@ -127,6 +135,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 			bucketName: n.bucketName,
 			prefix:     n.prefix,
 		}, stable)
+		logGCS("Lookup", start, n.bucketName, n.prefix+name, "-> .meta dir")
 		return child, 0
 	}
 
@@ -141,6 +150,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	attrs, err := bucket.Object(objectName).Attrs(ctx)
 	if err == nil {
 		// It's a file
+		logGCS("Lookup", start, n.bucketName, objectName, "-> object")
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
@@ -161,6 +171,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	_, err = it.Next()
 	if err != iterator.Done {
 		// It's a directory (has contents)
+		logGCS("Lookup", start, n.bucketName, prefixPath, "-> prefix")
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFDIR,
 		}
@@ -172,6 +183,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 		return child, 0
 	}
 
+	logGCS("Lookup", start, n.bucketName, n.prefix+name, "-> ENOENT")
 	return nil, syscall.ENOENT
 }
 
@@ -229,6 +241,7 @@ func (n *ObjectNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 // Read reads data from the object
 func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
 	if err != nil {
 		return nil, MapGCPError(err)
@@ -245,5 +258,6 @@ func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off
 		return nil, MapGCPError(err)
 	}
 
+	logGCS("ReadObject", start, n.bucketName, n.objectName, "offset", off, "requested", len(dest), "read", len(data), "bytes")
 	return fuse.ReadResultData(data), 0
 }

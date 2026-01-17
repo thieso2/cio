@@ -15,6 +15,7 @@ var (
 	mountDebug    bool
 	mountReadOnly bool
 	mountOptions  string // Comma-separated mount options (e.g., "allow_other,default_permissions")
+	logGCS        bool   // Log GCS API calls with timing
 )
 
 var mountCmd = &cobra.Command{
@@ -80,6 +81,7 @@ To unmount:
 			Debug:     mountDebug,
 			ReadOnly:  mountReadOnly,
 			MountOpts: mountOpts,
+			LogGCS:    logGCS,
 		}
 
 		// Mount the filesystem
@@ -116,5 +118,6 @@ func init() {
 	mountCmd.Flags().BoolVar(&mountDebug, "debug", false, "Enable debug logging")
 	mountCmd.Flags().BoolVar(&mountReadOnly, "read-only", false, "Mount filesystem in read-only mode")
 	mountCmd.Flags().StringVarP(&mountOptions, "options", "o", "", "Comma-separated FUSE mount options (e.g., allow_other,default_permissions)")
+	mountCmd.Flags().BoolVar(&logGCS, "log-gcs", false, "Log GCS API calls with timing information")
 	rootCmd.AddCommand(mountCmd)
 }

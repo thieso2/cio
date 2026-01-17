@@ -176,12 +176,14 @@ func (n *BucketMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []b
 
 // generateMetadata generates JSON metadata for the bucket
 func (n *BucketMetaFileNode) generateMetadata(ctx context.Context) ([]byte, error) {
+	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	attrs, err := client.Bucket(n.bucketName).Attrs(ctx)
+	logGCS("GetBucketAttrs", start, n.bucketName)
 	if err != nil {
 		return nil, err
 	}
@@ -257,12 +259,14 @@ func (n *ObjectMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []b
 
 // generateMetadata generates JSON metadata for the object
 func (n *ObjectMetaFileNode) generateMetadata(ctx context.Context) ([]byte, error) {
+	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	attrs, err := client.Bucket(n.bucketName).Object(n.objectName).Attrs(ctx)
+	logGCS("GetObjectAttrs", start, n.bucketName, n.objectName)
 	if err != nil {
 		return nil, err
 	}
