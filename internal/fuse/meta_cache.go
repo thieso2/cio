@@ -100,7 +100,7 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 		ExpiresAt: time.Now().Add(MetadataCacheTTL),
 	}
 
-	if cacheData, err := json.Marshal(cached); err == nil {
+	if cacheData, err := json.MarshalIndent(cached, "", "  "); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
 	}
 
@@ -146,7 +146,7 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 		ExpiresAt: time.Now().Add(MetadataCacheTTL),
 	}
 
-	if cacheData, err := json.Marshal(cached); err == nil {
+	if cacheData, err := json.MarshalIndent(cached, "", "  "); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
 	}
 
