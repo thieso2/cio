@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/internal/resolver"
@@ -16,6 +17,7 @@ var (
 	lsRecursive     bool
 	lsMaxResults    int
 	lsNoMap         bool
+	lsRaw           bool
 )
 
 var lsCmd = &cobra.Command{
@@ -113,6 +115,15 @@ Examples (BigQuery):
 		// Only reverse-map if: input was an alias AND --no-map flag is not set
 		shouldReverseMap := inputWasAlias && !lsNoMap
 
+		// Raw mode: just print names without formatting
+		if lsRaw {
+			for _, info := range resources {
+				name := extractName(info.Path)
+				fmt.Println(name)
+			}
+			return nil
+		}
+
 		// Print header for long format if resource type provides one
 		if lsLongFormat {
 			header := res.FormatLongHeader()
@@ -139,6 +150,28 @@ Examples (BigQuery):
 	},
 }
 
+// extractName extracts just the name from a full path
+// For BigQuery: bq://project.dataset.table -> table
+// For GCS: gs://bucket/path/to/object -> object
+func extractName(path string) string {
+	// Remove protocol prefix
+	path = strings.TrimPrefix(path, "gs://")
+	path = strings.TrimPrefix(path, "bq://")
+
+	// For BigQuery paths (contains dots)
+	if idx := strings.LastIndex(path, "."); idx != -1 {
+		return path[idx+1:]
+	}
+
+	// For GCS paths (contains slashes)
+	if idx := strings.LastIndex(path, "/"); idx != -1 {
+		return path[idx+1:]
+	}
+
+	// If no separator found, return the whole path
+	return path
+}
+
 func init() {
 	// Add flags
 	lsCmd.Flags().BoolVarP(&lsLongFormat, "long", "l", false, "use long listing format (timestamp, size, path)")
@@ -146,6 +179,7 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsRecursive, "recursive", "r", false, "list all objects recursively")
 	lsCmd.Flags().IntVar(&lsMaxResults, "max-results", 0, "maximum number of results (0 = no limit)")
 	lsCmd.Flags().BoolVarP(&lsNoMap, "no-map", "n", false, "show full paths without alias mapping")
+	lsCmd.Flags().BoolVar(&lsRaw, "raw", false, "output only resource names, one per line (useful for scripting)")
 
 	// Add to root command
 	rootCmd.AddCommand(lsCmd)
