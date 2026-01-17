@@ -1,0 +1,28 @@
+# Example configuration file for cio
+# Copy this to ~/.config/cio/config.yaml and customize
+
+# Bucket mappings - map short aliases to full GCS paths
+mappings:
+  am: gs://io-spooler-onprem-archived-metrics/
+  logs: gs://my-project-logs/
+  data: gs://my-data-bucket/raw/
+  backup: gs://my-backup-bucket/
+
+# Default settings
+defaults:
+  # Default GCP region
+  region: europe-west3
+
+  # Project ID - can use environment variables with ${VAR_NAME} syntax
+  project_id: ${PROJECT_ID}
+
+# Web server configuration (for Phase 4)
+server:
+  # Port for web server
+  port: 8080
+
+  # Host to bind to (localhost by default for security)
+  host: localhost
+
+  # Auto-start server on first use
+  auto_start: false

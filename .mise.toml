@@ -1,0 +1,204 @@
+# Mise configuration for cio project
+# https://mise.jdx.dev/
+
+[tools]
+go = "1.25"
+
+[tasks.build]
+description = "Build the cio binary"
+run = "go build -o cio cmd/cio/main.go"
+outputs = ["cio"]
+
+[tasks.install]
+description = "Install cio to $GOPATH/bin"
+run = "go install ./cmd/cio"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = [
+  "go clean",
+  "rm -f cio"
+]
+
+[tasks.test]
+description = "Run all tests"
+run = "go test -v ./..."
+
+[tasks.test-coverage]
+description = "Run tests with coverage report"
+run = [
+  "go test -coverprofile=coverage.out ./...",
+  "go tool cover -html=coverage.out -o coverage.html",
+  "echo 'Coverage report generated: coverage.html'"
+]
+
+[tasks.tidy]
+description = "Tidy and verify Go module dependencies"
+run = [
+  "go mod tidy",
+  "go mod verify"
+]
+
+[tasks.fmt]
+description = "Format Go code"
+run = "go fmt ./..."
+
+[tasks.vet]
+description = "Run go vet on all packages"
+run = "go vet ./..."
+
+[tasks.lint]
+description = "Run golangci-lint (if installed)"
+run = "golangci-lint run || echo 'golangci-lint not installed, skipping'"
+
+[tasks.check]
+description = "Run all checks (fmt, vet, test)"
+depends = ["fmt", "vet", "test"]
+
+[tasks.run]
+description = "Build and run cio with arguments"
+run = "go run cmd/cio/main.go"
+
+[tasks.dev]
+description = "Build and run in development mode with verbose output"
+run = "go run cmd/cio/main.go --verbose"
+
+[tasks.deps]
+description = "Download and verify dependencies"
+run = [
+  "go mod download",
+  "go mod verify"
+]
+
+[tasks.upgrade-deps]
+description = "Upgrade all dependencies to latest versions"
+run = [
+  "go get -u ./...",
+  "go mod tidy"
+]
+
+[tasks.setup]
+description = "Setup development environment"
+depends = ["deps"]
+run = [
+  "echo 'Installing development tools...'",
+  "go install golang.org/x/tools/cmd/goimports@latest || true",
+  "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest || true",
+  "echo 'Development environment ready!'"
+]
+
+[tasks.config-example]
+description = "Create example config in ~/.config/cio/"
+run = [
+  "mkdir -p ~/.config/cio",
+  "cp examples/config.example.yaml ~/.config/cio/config.yaml",
+  "echo 'Example config created at ~/.config/cio/config.yaml'"
+]
+
+[tasks.auth-setup]
+description = "Setup GCP authentication (requires gcloud CLI)"
+run = [
+  "echo 'Setting up GCP authentication...'",
+  "gcloud auth application-default login",
+  "echo 'Authentication complete!'"
+]
+
+[tasks.map-test]
+description = "Create a test mapping"
+run = [
+  "./cio map test gs://test-bucket/",
+  "./cio map list"
+]
+
+[tasks.benchmark]
+description = "Run benchmarks"
+run = "go test -bench=. -benchmem ./..."
+
+[tasks.release-build]
+description = "Build optimized release binary"
+env = { CGO_ENABLED = "0" }
+run = [
+  "go build -ldflags='-s -w' -trimpath -o cio cmd/cio/main.go",
+  "ls -lh cio"
+]
+
+[tasks.release-build-all]
+description = "Build release binaries for all platforms"
+run = [
+  "GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o cio-linux-amd64 cmd/cio/main.go",
+  "GOOS=linux GOARCH=arm64 go build -ldflags='-s -w' -o cio-linux-arm64 cmd/cio/main.go",
+  "GOOS=darwin GOARCH=amd64 go build -ldflags='-s -w' -o cio-darwin-amd64 cmd/cio/main.go",
+  "GOOS=darwin GOARCH=arm64 go build -ldflags='-s -w' -o cio-darwin-arm64 cmd/cio/main.go",
+  "GOOS=windows GOARCH=amd64 go build -ldflags='-s -w' -o cio-windows-amd64.exe cmd/cio/main.go",
+  "ls -lh cio-*"
+]
+
+[tasks.todo]
+description = "Show TODO comments in code"
+run = "grep -rn 'TODO\\|FIXME\\|XXX' --include='*.go' . || echo 'No TODOs found'"
+
+[tasks.stats]
+description = "Show project statistics"
+run = [
+  "echo '=== Code Statistics ==='",
+  "echo 'Total Go files:' $(find . -name '*.go' | wc -l)",
+  "echo 'Total lines of Go code:' $(find . -name '*.go' -exec cat {} \\; | wc -l)",
+  "echo ''",
+  "echo '=== Dependencies ==='",
+  "go list -m all",
+  "echo ''",
+  "echo '=== Binary Size ==='",
+  "ls -lh cio 2>/dev/null || echo 'Binary not built yet (run: mise build)'"
+]
+
+[tasks.watch]
+description = "Watch for changes and rebuild (requires entr)"
+run = "find . -name '*.go' | entr -r mise build"
+
+[tasks.doctor]
+description = "Check development environment"
+run = [
+  "echo '=== Checking Go installation ==='",
+  "go version",
+  "echo ''",
+  "echo '=== Checking Go environment ==='",
+  "go env GOPATH GOROOT",
+  "echo ''",
+  "echo '=== Checking gcloud CLI ==='",
+  "gcloud version || echo 'gcloud not installed'",
+  "echo ''",
+  "echo '=== Checking authentication ==='",
+  "gcloud auth application-default print-access-token >/dev/null 2>&1 && echo 'ADC configured ✓' || echo 'ADC not configured (run: mise auth-setup)'",
+  "echo ''",
+  "echo '=== Module status ==='",
+  "go mod verify"
+]
+
+[tasks.clean-all]
+description = "Deep clean including dependencies and cache"
+run = [
+  "mise clean",
+  "go clean -cache -testcache -modcache",
+  "rm -f cio cio-* coverage.out coverage.html"
+]
+
+# Git-related tasks
+[tasks.git-status]
+description = "Show git status"
+run = "git status"
+
+[tasks.git-log]
+description = "Show recent git log"
+run = "git log --oneline --graph --decorate -10"
+
+# Documentation tasks
+[tasks.docs-serve]
+description = "Serve documentation locally (requires python)"
+run = "python3 -m http.server 8000"
+
+[tasks.godoc]
+description = "Start godoc server"
+run = [
+  "echo 'Starting godoc server at http://localhost:6060'",
+  "godoc -http=:6060"
+]
