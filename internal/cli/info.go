@@ -25,15 +25,32 @@ Examples:
 
 		// Resolve alias to full path if needed
 		r := resolver.Create(cfg)
-		fullPath, err := r.Resolve(path)
-		if err != nil {
-			return err
+		var fullPath string
+		var err error
+		var inputWasAlias bool
+
+		// If it's already a gs:// or bq:// path, use it directly
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
+			fullPath = path
+			inputWasAlias = false
+		} else {
+			fullPath, err = r.Resolve(path)
+			if err != nil {
+				return err
+			}
+			inputWasAlias = true
 		}
 
 		ctx := context.Background()
 
-		// Create resource factory
-		factory := resource.CreateFactory(r.ReverseResolve)
+		// Create resource factory with appropriate formatter
+		var formatter resource.PathFormatter
+		if inputWasAlias {
+			formatter = r.ReverseResolve
+		} else {
+			formatter = func(path string) string { return path }
+		}
+		factory := resource.CreateFactory(formatter)
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)
@@ -52,9 +69,12 @@ Examples:
 			return fmt.Errorf("failed to get resource info: %w", err)
 		}
 
-		// Show detailed format
-		aliasPath := r.ReverseResolve(info.Path)
-		fmt.Print(res.FormatDetailed(info, aliasPath))
+		// Show detailed format - use appropriate display path
+		displayPath := info.Path
+		if inputWasAlias {
+			displayPath = r.ReverseResolve(info.Path)
+		}
+		fmt.Print(res.FormatDetailed(info, displayPath))
 
 		return nil
 	},

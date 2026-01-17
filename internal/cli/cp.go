@@ -63,25 +63,40 @@ func runCp(cmd *cobra.Command, args []string) error {
 	sourceIsLocal := !resolver.IsGCSPath(source)
 	destIsLocal := !resolver.IsGCSPath(destination)
 
-	// Resolve aliases
+	// Resolve aliases and track if they were aliases
 	r := resolver.Create(cfg)
 
 	var sourcePath, destPath string
 	var err error
+	var sourceWasAlias, destWasAlias bool
 
 	if !sourceIsLocal {
-		sourcePath, err = r.Resolve(source)
-		if err != nil {
-			return fmt.Errorf("failed to resolve source: %w", err)
+		// Source is GCS - check if it's an alias
+		if resolver.IsGCSPath(source) {
+			sourcePath = source
+			sourceWasAlias = false
+		} else {
+			sourcePath, err = r.Resolve(source)
+			if err != nil {
+				return fmt.Errorf("failed to resolve source: %w", err)
+			}
+			sourceWasAlias = true
 		}
 	} else {
 		sourcePath = source
 	}
 
 	if !destIsLocal {
-		destPath, err = r.Resolve(destination)
-		if err != nil {
-			return fmt.Errorf("failed to resolve destination: %w", err)
+		// Destination is GCS - check if it's an alias
+		if resolver.IsGCSPath(destination) {
+			destPath = destination
+			destWasAlias = false
+		} else {
+			destPath, err = r.Resolve(destination)
+			if err != nil {
+				return fmt.Errorf("failed to resolve destination: %w", err)
+			}
+			destWasAlias = true
 		}
 	} else {
 		destPath = destination
@@ -96,10 +111,10 @@ func runCp(cmd *cobra.Command, args []string) error {
 	// Execute copy based on direction
 	if sourceIsLocal && !destIsLocal {
 		// Local -> GCS (upload)
-		return uploadPath(ctx, client, sourcePath, destPath)
+		return uploadPath(ctx, client, r, sourcePath, destPath, destWasAlias)
 	} else if !sourceIsLocal && destIsLocal {
 		// GCS -> Local (download)
-		return downloadPath(ctx, client, sourcePath, destPath)
+		return downloadPath(ctx, client, r, sourcePath, destPath, sourceWasAlias)
 	} else if !sourceIsLocal && !destIsLocal {
 		// GCS -> GCS (not yet implemented)
 		return fmt.Errorf("GCS to GCS copy not yet implemented")
@@ -109,16 +124,20 @@ func runCp(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func uploadPath(ctx context.Context, client *gcs.Client, localPath, gcsPath string) error {
+func uploadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver, localPath, gcsPath string, destWasAlias bool) error {
 	// Check if source exists
 	fileInfo, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("cannot access %q: %w", localPath, err)
 	}
 
-	// Create path formatter using resolver
-	r := resolver.Create(cfg)
-	formatter := r.ReverseResolve
+	// Create path formatter - only reverse-map if destination was an alias
+	var formatter storage.PathFormatter
+	if destWasAlias {
+		formatter = r.ReverseResolve
+	} else {
+		formatter = func(path string) string { return path }
+	}
 
 	if fileInfo.IsDir() {
 		if !cpRecursive {
@@ -130,16 +149,20 @@ func uploadPath(ctx context.Context, client *gcs.Client, localPath, gcsPath stri
 	return storage.UploadFile(ctx, client, localPath, gcsPath, verbose, formatter)
 }
 
-func downloadPath(ctx context.Context, client *gcs.Client, gcsPath, localPath string) error {
+func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver, gcsPath, localPath string, sourceWasAlias bool) error {
 	// Parse GCS path
 	bucket, object, err := resolver.ParseGCSPath(gcsPath)
 	if err != nil {
 		return err
 	}
 
-	// Create path formatter using resolver
-	r := resolver.Create(cfg)
-	formatter := r.ReverseResolve
+	// Create path formatter - only reverse-map if source was an alias
+	var formatter storage.PathFormatter
+	if sourceWasAlias {
+		formatter = r.ReverseResolve
+	} else {
+		formatter = func(path string) string { return path }
+	}
 
 	// Check if path contains wildcards
 	if resolver.HasWildcard(object) {
