@@ -33,6 +33,7 @@ type MountOptions struct {
 	ReadOnly   bool
 	MountOpts  []string // Raw FUSE mount options (e.g., ["allow_other", "default_permissions"])
 	LogGCS     bool     // Enable GCS API call logging with timing
+	CleanCache bool     // Clear metadata cache on startup
 }
 
 // Server wraps the FUSE server and provides lifecycle management
@@ -51,6 +52,15 @@ func Mount(mountpoint string, opts MountOptions) (*Server, error) {
 	// Enable GCS logging if requested
 	if opts.LogGCS {
 		EnableGCSLogging()
+	}
+
+	// Clean metadata cache if requested
+	if opts.CleanCache {
+		cache := GetMetadataCache()
+		cache.InvalidateAll()
+		if opts.LogGCS {
+			log.Println("[GCS] Metadata cache cleared on startup")
+		}
 	}
 
 	// Create root node
