@@ -27,10 +27,9 @@ var mountCmd = &cobra.Command{
 
 The filesystem structure is:
   <mountpoint>/
-    └─ <project-id>/
-         ├─ storage/    (GCS buckets and objects)
-         ├─ bigquery/   (datasets and tables)
-         └─ pubsub/     (topics and subscriptions)
+    ├─ storage/    (GCS buckets and objects)
+    ├─ bigquery/   (datasets and tables)
+    └─ pubsub/     (topics and subscriptions)
 
 Examples:
   # Mount with default project

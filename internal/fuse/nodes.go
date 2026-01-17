@@ -10,7 +10,7 @@ import (
 )
 
 // RootNode represents the root directory of the FUSE filesystem (e.g., /mnt/gcp/)
-// It contains project directories.
+// It contains service directories (storage, bigquery, pubsub) directly.
 type RootNode struct {
 	fs.Inode
 	projectID string
@@ -20,13 +20,12 @@ var _ fs.NodeReaddirer = (*RootNode)(nil)
 var _ fs.NodeGetattrer = (*RootNode)(nil)
 var _ fs.NodeLookuper = (*RootNode)(nil)
 
-// Readdir lists the project directory under the root
+// Readdir lists the service directories under the root
 func (n *RootNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	entries := []fuse.DirEntry{
-		{
-			Name: n.projectID,
-			Mode: fuse.S_IFDIR,
-		},
+		{Name: "storage", Mode: fuse.S_IFDIR},
+		{Name: "bigquery", Mode: fuse.S_IFDIR},
+		{Name: "pubsub", Mode: fuse.S_IFDIR},
 	}
 	return fs.NewListDirStream(entries), 0
 }
@@ -40,52 +39,8 @@ func (n *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 	return 0
 }
 
-// Lookup finds a child node by name (project directory)
-func (n *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	if name != n.projectID {
-		return nil, syscall.ENOENT
-	}
-
-	// Create or retrieve the project node
-	stable := fs.StableAttr{
-		Mode: fuse.S_IFDIR,
-	}
-	child := n.NewInode(ctx, &ProjectNode{projectID: n.projectID}, stable)
-	return child, 0
-}
-
-// ProjectNode represents a GCP project directory (e.g., /mnt/gcp/my-project/)
-// It contains service directories (storage, bigquery, pubsub).
-type ProjectNode struct {
-	fs.Inode
-	projectID string
-}
-
-var _ fs.NodeReaddirer = (*ProjectNode)(nil)
-var _ fs.NodeGetattrer = (*ProjectNode)(nil)
-var _ fs.NodeLookuper = (*ProjectNode)(nil)
-
-// Readdir lists the service directories under the project
-func (n *ProjectNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	entries := []fuse.DirEntry{
-		{Name: "storage", Mode: fuse.S_IFDIR},
-		{Name: "bigquery", Mode: fuse.S_IFDIR},
-		{Name: "pubsub", Mode: fuse.S_IFDIR},
-	}
-	return fs.NewListDirStream(entries), 0
-}
-
-// Getattr returns attributes for the project directory
-func (n *ProjectNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
-	return 0
-}
-
 // Lookup finds a child node by name (service directory)
-func (n *ProjectNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+func (n *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// Only allow known service names
 	if name != "storage" && name != "bigquery" && name != "pubsub" {
 		return nil, syscall.ENOENT
@@ -102,7 +57,7 @@ func (n *ProjectNode) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 	return child, 0
 }
 
-// ServiceNode represents a GCP service directory (e.g., /mnt/gcp/my-project/storage/)
+// ServiceNode represents a GCP service directory (e.g., /mnt/gcp/storage/)
 // Phase 0: Returns empty directory listing
 // Phase 1+: Will be updated to list actual resources
 type ServiceNode struct {
