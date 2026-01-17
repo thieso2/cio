@@ -1,4 +1,4 @@
-module github.com/thies/cio
+module github.com/thieso2/cio
 
 go 1.25.6
 

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/thies/cio/internal/config"
+	"github.com/thieso2/cio/internal/config"
 )
 
 var (

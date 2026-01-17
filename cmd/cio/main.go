@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/thies/cio/internal/cli"
+	"github.com/thieso2/cio/internal/cli"
 )
 
 func main() {

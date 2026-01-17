@@ -15,13 +15,13 @@ A fast CLI tool for Google Cloud Storage that replaces common `gcloud storage` c
 ### Using Go Install
 
 ```bash
-go install github.com/thies/cio/cmd/cio@latest
+go install github.com/thieso2/cio/cmd/cio@latest
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/thies/cio.git
+git clone https://github.com/thieso2/cio.git
 cd cio
 make install
 ```

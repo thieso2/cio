@@ -7,7 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/thies/cio/internal/resolver"
+	"github.com/thieso2/cio/internal/resolver"
 )
 
 var mapCmd = &cobra.Command{

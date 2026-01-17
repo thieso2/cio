@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/thies/cio/internal/resolver"
-	"github.com/thies/cio/internal/storage"
+	"github.com/thieso2/cio/internal/resolver"
+	"github.com/thieso2/cio/internal/storage"
 )
 
 var (
