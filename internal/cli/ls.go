@@ -58,15 +58,18 @@ Examples (BigQuery):
 		r := resolver.New(cfg)
 		var fullPath string
 		var err error
+		var inputWasAlias bool
 
 		// If it's already a gs:// or bq:// path, use it directly
 		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
 			fullPath = path
+			inputWasAlias = false
 		} else {
 			fullPath, err = r.Resolve(path)
 			if err != nil {
 				return err
 			}
+			inputWasAlias = true // User provided an alias
 		}
 
 		if verbose {
@@ -106,11 +109,14 @@ Examples (BigQuery):
 			return nil
 		}
 
+		// Determine whether to reverse-map output
+		// Only reverse-map if: input was an alias AND --no-map flag is not set
+		shouldReverseMap := inputWasAlias && !lsNoMap
+
 		// Print results
 		for _, info := range resources {
-			// Use full path if --no-map flag is set, otherwise use alias path
 			displayPath := info.Path
-			if !lsNoMap {
+			if shouldReverseMap {
 				displayPath = r.ReverseResolve(info.Path)
 			}
 
