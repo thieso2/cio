@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -13,6 +14,7 @@ import (
 
 // listBQDatasets lists all datasets in a project and returns a DirStream
 func listBQDatasets(ctx context.Context, projectID string) (fs.DirStream, syscall.Errno) {
+	start := time.Now()
 	datasets, err := bigquery.ListDatasets(ctx, projectID)
 	if err != nil {
 		return nil, MapGCPError(err)
@@ -32,6 +34,7 @@ func listBQDatasets(ctx context.Context, projectID string) (fs.DirStream, syscal
 		})
 	}
 
+	logGC("BQ:ListDatasets", start, projectID, len(entries), "datasets")
 	return fs.NewListDirStream(entries), 0
 }
 
@@ -48,6 +51,7 @@ var _ fs.NodeLookuper = (*DatasetNode)(nil)
 
 // Readdir lists all tables in the dataset
 func (n *DatasetNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	start := time.Now()
 	tables, err := bigquery.ListTables(ctx, n.projectID, n.datasetID)
 	if err != nil {
 		return nil, MapGCPError(err)
@@ -70,6 +74,7 @@ func (n *DatasetNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno)
 		})
 	}
 
+	logGC("BQ:ListTables", start, n.datasetID, len(entries)-1, "tables") // -1 for .meta dir
 	return fs.NewListDirStream(entries), 0
 }
 
@@ -190,9 +195,11 @@ func (n *TableMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *f
 
 // Read returns the content of the virtual file
 func (n *TableMetaFileNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	start := time.Now()
 	// Get table metadata
 	info, err := bigquery.DescribeTable(ctx, n.projectID, n.datasetID, n.tableID)
 	if err != nil {
+		logGC("BQ:DescribeTable", start, n.datasetID, n.tableID, "ERROR", err)
 		return nil, MapGCPError(err)
 	}
 
@@ -216,6 +223,7 @@ func (n *TableMetaFileNode) Read(ctx context.Context, fh fs.FileHandle, dest []b
 		end = int64(len(data))
 	}
 
+	logGC("BQ:ReadTableMetadata", start, n.datasetID, n.tableID, n.fileName, "offset", off, "bytes", end-off)
 	return fuse.ReadResultData(data[off:end]), 0
 }
 

@@ -80,7 +80,7 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 		if json.Unmarshal(data, &cached) == nil {
 			// Check if cache is still valid
 			if time.Now().Before(cached.ExpiresAt) {
-				logGCS("CacheHit", start, "bucket", bucketName, "type", "metadata")
+				logGC("CacheHit", start, "bucket", bucketName, "type", "metadata")
 				// Re-prettify the JSON data before returning
 				var metadata map[string]interface{}
 				if json.Unmarshal(cached.Data, &metadata) == nil {
@@ -91,13 +91,13 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 				// Fallback to raw data if prettification fails
 				return cached.Data, nil
 			} else {
-				logGCS("CacheExpired", start, "bucket", bucketName, "type", "metadata")
+				logGC("CacheExpired", start, "bucket", bucketName, "type", "metadata")
 			}
 		}
 	}
 
 	// Cache miss or expired - generate new metadata
-	logGCS("CacheMiss", start, "bucket", bucketName, "type", "metadata")
+	logGC("CacheMiss", start, "bucket", bucketName, "type", "metadata")
 	metadata, err := generator()
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 
 	if cacheData, err := json.Marshal(cached); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
-		logGCS("CacheSave", start, "bucket", bucketName, "type", "metadata")
+		logGC("CacheSave", start, "bucket", bucketName, "type", "metadata")
 	}
 
 	return metadata, nil
@@ -140,7 +140,7 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 		if json.Unmarshal(data, &cached) == nil {
 			// Check if cache is still valid
 			if time.Now().Before(cached.ExpiresAt) {
-				logGCS("CacheHit", start, "object", objectName, "type", "metadata")
+				logGC("CacheHit", start, "object", objectName, "type", "metadata")
 				// Re-prettify the JSON data before returning
 				var metadata map[string]interface{}
 				if json.Unmarshal(cached.Data, &metadata) == nil {
@@ -151,13 +151,13 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 				// Fallback to raw data if prettification fails
 				return cached.Data, nil
 			} else {
-				logGCS("CacheExpired", start, "object", objectName, "type", "metadata")
+				logGC("CacheExpired", start, "object", objectName, "type", "metadata")
 			}
 		}
 	}
 
 	// Cache miss or expired - generate new metadata
-	logGCS("CacheMiss", start, "object", objectName, "type", "metadata")
+	logGC("CacheMiss", start, "object", objectName, "type", "metadata")
 	metadata, err := generator()
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 
 	if cacheData, err := json.Marshal(cached); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
-		logGCS("CacheSave", start, "object", objectName, "type", "metadata")
+		logGC("CacheSave", start, "object", objectName, "type", "metadata")
 	}
 
 	return metadata, nil

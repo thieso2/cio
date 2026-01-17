@@ -218,7 +218,7 @@ func (n *BucketMetaFileNode) generateMetadata(ctx context.Context) ([]byte, erro
 		}
 
 		attrs, err := client.Bucket(n.bucketName).Attrs(ctx)
-		logGCS("GetBucketAttrs", start, n.bucketName)
+		logGC("GetBucketAttrs", start, n.bucketName)
 		if err != nil {
 			return nil, err
 		}
@@ -318,7 +318,7 @@ func (n *ObjectMetaFileNode) generateMetadata(ctx context.Context) ([]byte, erro
 		}
 
 		attrs, err := client.Bucket(n.bucketName).Object(n.objectName).Attrs(ctx)
-		logGCS("GetObjectAttrs", start, n.bucketName, n.objectName)
+		logGC("GetObjectAttrs", start, n.bucketName, n.objectName)
 		if err != nil {
 			return nil, err
 		}

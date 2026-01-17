@@ -10,19 +10,19 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-// gcsLogger is the global logger for GCS API calls (set by Mount)
-var gcsLogger *log.Logger
+// gcLogger is the global logger for Google Cloud API calls (set by Mount)
+var gcLogger *log.Logger
 
-// EnableGCSLogging enables GCS API call logging
-func EnableGCSLogging() {
-	gcsLogger = log.New(os.Stderr, "[GCS] ", log.LstdFlags|log.Lmicroseconds)
+// EnableGCLogging enables Google Cloud API call logging (GCS, BigQuery, etc.)
+func EnableGCLogging() {
+	gcLogger = log.New(os.Stderr, "[GC] ", log.LstdFlags|log.Lmicroseconds)
 }
 
-// logGCS logs a GCS operation with timing if logging is enabled
-func logGCS(operation string, start time.Time, args ...interface{}) {
-	if gcsLogger != nil {
+// logGC logs a Google Cloud operation with timing if logging is enabled
+func logGC(operation string, start time.Time, args ...interface{}) {
+	if gcLogger != nil {
 		elapsed := time.Since(start)
-		gcsLogger.Printf("%s (%.3fms) %v", operation, float64(elapsed.Microseconds())/1000.0, args)
+		gcLogger.Printf("%s (%.3fms) %v", operation, float64(elapsed.Microseconds())/1000.0, args)
 	}
 }
 
@@ -32,7 +32,7 @@ type MountOptions struct {
 	Debug         bool
 	ReadOnly      bool
 	MountOpts     []string // Raw FUSE mount options (e.g., ["allow_other", "default_permissions"])
-	LogGCS        bool     // Enable GCS API call logging with timing
+	LogGC         bool     // Enable Google Cloud API call logging with timing (GCS, BigQuery, etc.)
 	CleanCache    bool     // Clear metadata cache on startup
 	ReadAheadSize int      // Read-ahead buffer size in bytes (0 = use default 5MB)
 }
@@ -50,28 +50,28 @@ func Mount(mountpoint string, opts MountOptions) (*Server, error) {
 		return nil, fmt.Errorf("mountpoint does not exist: %s", mountpoint)
 	}
 
-	// Enable GCS logging if requested
-	if opts.LogGCS {
-		EnableGCSLogging()
+	// Enable Google Cloud API logging if requested
+	if opts.LogGC {
+		EnableGCLogging()
 	}
 
 	// Clean metadata cache if requested
 	if opts.CleanCache {
 		cache := GetMetadataCache()
 		cache.InvalidateAll()
-		if opts.LogGCS {
-			log.Println("[GCS] Metadata cache cleared on startup")
+		if opts.LogGC {
+			log.Println("[GC] Metadata cache cleared on startup")
 		}
 	}
 
 	// Configure read-ahead buffer size
 	if opts.ReadAheadSize > 0 {
 		SetReadAheadBufferSize(opts.ReadAheadSize)
-		if opts.LogGCS {
-			log.Printf("[GCS] Read-ahead buffer size set to %d bytes (%.1f MB)", opts.ReadAheadSize, float64(opts.ReadAheadSize)/(1024*1024))
+		if opts.LogGC {
+			log.Printf("[GC] Read-ahead buffer size set to %d bytes (%.1f MB)", opts.ReadAheadSize, float64(opts.ReadAheadSize)/(1024*1024))
 		}
-	} else if opts.LogGCS {
-		log.Printf("[GCS] Using default read-ahead buffer size: %d bytes (%.1f MB)", DefaultReadAheadSize, float64(DefaultReadAheadSize)/(1024*1024))
+	} else if opts.LogGC {
+		log.Printf("[GC] Using default read-ahead buffer size: %d bytes (%.1f MB)", DefaultReadAheadSize, float64(DefaultReadAheadSize)/(1024*1024))
 	}
 
 	// Create root node

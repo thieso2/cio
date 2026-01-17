@@ -136,8 +136,8 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 		if end > len(b.buffer) {
 			end = len(b.buffer)
 		}
-		if gcsLogger != nil {
-			gcsLogger.Printf("ReadAheadBufferHit object=%s offset=%d requested=%d served_from_buffer=%d", b.objectName, off, len(dest), end-start)
+		if gcLogger != nil {
+			gcLogger.Printf("ReadAheadBufferHit object=%s offset=%d requested=%d served_from_buffer=%d", b.objectName, off, len(dest), end-start)
 		}
 		return b.buffer[start:end], nil
 	}
@@ -148,8 +148,8 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 		readSize = ReadAheadBufferSize
 	}
 
-	if gcsLogger != nil {
-		gcsLogger.Printf("ReadAheadBufferMiss object=%s offset=%d fuse_requested=%d fetching_from_gcs=%d", b.objectName, off, len(dest), readSize)
+	if gcLogger != nil {
+		gcLogger.Printf("ReadAheadBufferMiss object=%s offset=%d fuse_requested=%d fetching_from_gcs=%d", b.objectName, off, len(dest), readSize)
 	}
 
 	reader, err := bucket.Object(b.objectName).NewRangeReader(ctx, off, int64(readSize))
@@ -171,8 +171,8 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 	b.offset = off
 	b.valid = true
 
-	if gcsLogger != nil {
-		gcsLogger.Printf("ReadAheadBufferFetched object=%s offset=%d fetched=%d buffered=%d", b.objectName, off, n, len(b.buffer))
+	if gcLogger != nil {
+		gcLogger.Printf("ReadAheadBufferFetched object=%s offset=%d fetched=%d buffered=%d", b.objectName, off, n, len(b.buffer))
 	}
 
 	// Return requested portion
