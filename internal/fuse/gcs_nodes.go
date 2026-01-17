@@ -184,11 +184,18 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
-		child := n.NewInode(ctx, &ObjectNode{
+		node := &ObjectNode{
 			bucketName: n.bucketName,
 			objectName: objectName,
 			attrs:      attrs,
-		}, stable)
+		}
+		child := n.NewInode(ctx, node, stable)
+
+		// Populate entry attributes so file size is known on first access
+		var attrOut fuse.AttrOut
+		node.Getattr(ctx, nil, &attrOut)
+		out.Attr = attrOut.Attr
+
 		return child, 0
 	}
 

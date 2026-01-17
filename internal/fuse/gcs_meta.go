@@ -98,9 +98,18 @@ func (n *MetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse.E
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
-		child := n.NewInode(ctx, &BucketMetaFileNode{
+		node := &BucketMetaFileNode{
 			bucketName: n.bucketName,
-		}, stable)
+		}
+		child := n.NewInode(ctx, node, stable)
+
+		// Populate entry attributes so file size is known on first access
+		var attrOut fuse.AttrOut
+		if errno := node.Getattr(ctx, nil, &attrOut); errno != 0 {
+			return nil, errno
+		}
+		out.Attr = attrOut.Attr
+
 		return child, 0
 	}
 
@@ -110,10 +119,19 @@ func (n *MetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse.E
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
-		child := n.NewInode(ctx, &ObjectMetaFileNode{
+		node := &ObjectMetaFileNode{
 			bucketName: n.bucketName,
 			objectName: objectName,
-		}, stable)
+		}
+		child := n.NewInode(ctx, node, stable)
+
+		// Populate entry attributes so file size is known on first access
+		var attrOut fuse.AttrOut
+		if errno := node.Getattr(ctx, nil, &attrOut); errno != 0 {
+			return nil, errno
+		}
+		out.Attr = attrOut.Attr
+
 		return child, 0
 	}
 
