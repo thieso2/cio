@@ -115,11 +115,11 @@ Examples (BigQuery):
 		// Only reverse-map if: input was an alias AND --no-map flag is not set
 		shouldReverseMap := inputWasAlias && !lsNoMap
 
-		// Raw mode: just print names without formatting
+		// Raw mode: output paths without protocol prefix
 		if lsRaw {
 			for _, info := range resources {
-				name := extractName(info.Path)
-				fmt.Println(name)
+				rawPath := extractRawPath(info.Path)
+				fmt.Println(rawPath)
 			}
 			return nil
 		}
@@ -150,25 +150,13 @@ Examples (BigQuery):
 	},
 }
 
-// extractName extracts just the name from a full path
-// For BigQuery: bq://project.dataset.table -> table
-// For GCS: gs://bucket/path/to/object -> object
-func extractName(path string) string {
+// extractRawPath removes the protocol prefix from a path
+// For BigQuery: bq://project.dataset.table -> project.dataset.table
+// For GCS: gs://bucket/path/to/object -> bucket/path/to/object
+func extractRawPath(path string) string {
 	// Remove protocol prefix
 	path = strings.TrimPrefix(path, "gs://")
 	path = strings.TrimPrefix(path, "bq://")
-
-	// For BigQuery paths (contains dots)
-	if idx := strings.LastIndex(path, "."); idx != -1 {
-		return path[idx+1:]
-	}
-
-	// For GCS paths (contains slashes)
-	if idx := strings.LastIndex(path, "/"); idx != -1 {
-		return path[idx+1:]
-	}
-
-	// If no separator found, return the whole path
 	return path
 }
 
