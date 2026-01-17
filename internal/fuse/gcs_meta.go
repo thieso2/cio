@@ -174,32 +174,36 @@ func (n *BucketMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []b
 	return fuse.ReadResultData(content[off:end]), 0
 }
 
-// generateMetadata generates JSON metadata for the bucket
+// generateMetadata generates JSON metadata for the bucket (with caching)
 func (n *BucketMetaFileNode) generateMetadata(ctx context.Context) ([]byte, error) {
-	start := time.Now()
-	client, err := storagepkg.GetClient(ctx)
-	if err != nil {
-		return nil, err
-	}
+	cache := GetMetadataCache()
 
-	attrs, err := client.Bucket(n.bucketName).Attrs(ctx)
-	logGCS("GetBucketAttrs", start, n.bucketName)
-	if err != nil {
-		return nil, err
-	}
+	return cache.GetBucketMetadata(ctx, n.bucketName, func() ([]byte, error) {
+		start := time.Now()
+		client, err := storagepkg.GetClient(ctx)
+		if err != nil {
+			return nil, err
+		}
 
-	metadata := map[string]interface{}{
-		"version": "1.0",
-		"type":    "bucket",
-		"name":    attrs.Name,
-		"location": attrs.Location,
-		"storage_class": attrs.StorageClass,
-		"created":       attrs.Created.Format(time.RFC3339),
-		"versioning_enabled": attrs.VersioningEnabled,
-		"labels":        attrs.Labels,
-	}
+		attrs, err := client.Bucket(n.bucketName).Attrs(ctx)
+		logGCS("GetBucketAttrs", start, n.bucketName)
+		if err != nil {
+			return nil, err
+		}
 
-	return json.MarshalIndent(metadata, "", "  ")
+		metadata := map[string]interface{}{
+			"version":            "1.0",
+			"type":               "bucket",
+			"name":               attrs.Name,
+			"location":           attrs.Location,
+			"storage_class":      attrs.StorageClass,
+			"created":            attrs.Created.Format(time.RFC3339),
+			"versioning_enabled": attrs.VersioningEnabled,
+			"labels":             attrs.Labels,
+		}
+
+		return json.MarshalIndent(metadata, "", "  ")
+	})
 }
 
 // ObjectMetaFileNode represents a <name>.json metadata file for an object
@@ -257,36 +261,40 @@ func (n *ObjectMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []b
 	return fuse.ReadResultData(content[off:end]), 0
 }
 
-// generateMetadata generates JSON metadata for the object
+// generateMetadata generates JSON metadata for the object (with caching)
 func (n *ObjectMetaFileNode) generateMetadata(ctx context.Context) ([]byte, error) {
-	start := time.Now()
-	client, err := storagepkg.GetClient(ctx)
-	if err != nil {
-		return nil, err
-	}
+	cache := GetMetadataCache()
 
-	attrs, err := client.Bucket(n.bucketName).Object(n.objectName).Attrs(ctx)
-	logGCS("GetObjectAttrs", start, n.bucketName, n.objectName)
-	if err != nil {
-		return nil, err
-	}
+	return cache.GetObjectMetadata(ctx, n.bucketName, n.objectName, func() ([]byte, error) {
+		start := time.Now()
+		client, err := storagepkg.GetClient(ctx)
+		if err != nil {
+			return nil, err
+		}
 
-	metadata := map[string]interface{}{
-		"version":      "1.0",
-		"type":         "object",
-		"bucket":       n.bucketName,
-		"name":         attrs.Name,
-		"content_type": attrs.ContentType,
-		"size":         attrs.Size,
-		"md5":          fmt.Sprintf("%x", attrs.MD5),
-		"crc32c":       fmt.Sprintf("%x", attrs.CRC32C),
-		"created":      attrs.Created.Format(time.RFC3339),
-		"updated":      attrs.Updated.Format(time.RFC3339),
-		"generation":   attrs.Generation,
-		"metageneration": attrs.Metageneration,
-		"storage_class": attrs.StorageClass,
-		"metadata":     attrs.Metadata,
-	}
+		attrs, err := client.Bucket(n.bucketName).Object(n.objectName).Attrs(ctx)
+		logGCS("GetObjectAttrs", start, n.bucketName, n.objectName)
+		if err != nil {
+			return nil, err
+		}
 
-	return json.MarshalIndent(metadata, "", "  ")
+		metadata := map[string]interface{}{
+			"version":        "1.0",
+			"type":           "object",
+			"bucket":         n.bucketName,
+			"name":           attrs.Name,
+			"content_type":   attrs.ContentType,
+			"size":           attrs.Size,
+			"md5":            fmt.Sprintf("%x", attrs.MD5),
+			"crc32c":         fmt.Sprintf("%x", attrs.CRC32C),
+			"created":        attrs.Created.Format(time.RFC3339),
+			"updated":        attrs.Updated.Format(time.RFC3339),
+			"generation":     attrs.Generation,
+			"metageneration": attrs.Metageneration,
+			"storage_class":  attrs.StorageClass,
+			"metadata":       attrs.Metadata,
+		}
+
+		return json.MarshalIndent(metadata, "", "  ")
+	})
 }

@@ -2,9 +2,9 @@ package fuse
 
 import (
 	"context"
-	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,11 +44,22 @@ type BucketNode struct {
 	prefix     string // For subdirectories within a bucket
 }
 
+// ObjectNode represents a GCS object (file)
+type ObjectNode struct {
+	fs.Inode
+	bucketName   string
+	objectName   string
+	attrs        *storage.ObjectAttrs
+	readAhead    *ReadAheadBuffer
+	readAheadMu  sync.Mutex
+}
+
 var _ fs.NodeReaddirer = (*BucketNode)(nil)
 var _ fs.NodeGetattrer = (*BucketNode)(nil)
 var _ fs.NodeLookuper = (*BucketNode)(nil)
+var _ fs.NodeSetattrer = (*BucketNode)(nil)
 
-// Readdir lists objects and prefixes in the bucket
+// Readdir lists objects and prefixes in the bucket using concurrent API calls
 func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
@@ -62,7 +73,11 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 		Delimiter: "/",
 	}
 
-	it := bucket.Objects(ctx, query)
+	// Use concurrent listing for better performance
+	allAttrs, err := listObjectsConcurrent(ctx, bucket, query)
+	if err != nil {
+		return nil, MapGCPError(err)
+	}
 
 	entries := []fuse.DirEntry{
 		{Name: ".meta", Mode: fuse.S_IFDIR},
@@ -71,15 +86,8 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 	seen := make(map[string]bool)
 	seen[".meta"] = true
 
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, MapGCPError(err)
-		}
-
+	// Process all results
+	for _, attrs := range allAttrs {
 		// Handle directory prefixes
 		if attrs.Prefix != "" {
 			// Extract the directory name from the prefix
@@ -122,6 +130,20 @@ func (n *BucketNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	out.Gid = uint32(os.Getgid())
 	out.Nlink = 2
 	return 0
+}
+
+// Setattr handles attribute changes (used for cache invalidation via `touch .`)
+func (n *BucketNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	// Detect `touch .` by checking if mtime is being set
+	if in.Valid&fuse.FATTR_MTIME != 0 {
+		// Invalidate metadata cache for this bucket
+		cache := GetMetadataCache()
+		cache.InvalidateBucket(n.bucketName)
+		logGCS("CacheInvalidate", time.Now(), n.bucketName, n.prefix, "cache cleared via touch")
+	}
+
+	// Return current attributes (read-only filesystem)
+	return n.Getattr(ctx, f, out)
 }
 
 // Lookup finds a child node by name (object or prefix)
@@ -195,14 +217,6 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	return nil, syscall.ENOENT
 }
 
-// ObjectNode represents a GCS object (file)
-type ObjectNode struct {
-	fs.Inode
-	bucketName string
-	objectName string
-	attrs      *storage.ObjectAttrs
-}
-
 var _ fs.NodeOpener = (*ObjectNode)(nil)
 var _ fs.NodeGetattrer = (*ObjectNode)(nil)
 var _ fs.NodeReader = (*ObjectNode)(nil)
@@ -247,7 +261,7 @@ func (n *ObjectNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	return 0
 }
 
-// Read reads data from the object
+// Read reads data from the object with read-ahead buffering
 func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
@@ -255,14 +269,18 @@ func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off
 		return nil, MapGCPError(err)
 	}
 
-	reader, err := client.Bucket(n.bucketName).Object(n.objectName).NewRangeReader(ctx, off, int64(len(dest)))
-	if err != nil {
-		return nil, MapGCPError(err)
+	// Initialize read-ahead buffer on first read
+	n.readAheadMu.Lock()
+	if n.readAhead == nil {
+		n.readAhead = NewReadAheadBuffer(n.bucketName, n.objectName)
 	}
-	defer reader.Close()
+	buffer := n.readAhead
+	n.readAheadMu.Unlock()
 
-	data, err := io.ReadAll(reader)
-	if err != nil && err != io.EOF {
+	// Try to read from buffer with read-ahead
+	data, err := buffer.Read(ctx, client.Bucket(n.bucketName), off, dest)
+	if err != nil {
+		logGCS("ReadObject", start, n.bucketName, n.objectName, "offset", off, "requested", len(dest), "ERROR", err)
 		return nil, MapGCPError(err)
 	}
 
