@@ -47,14 +47,20 @@ func ValidateAlias(alias string) error {
 	return nil
 }
 
-// ValidateGCSPath checks if a GCS path is valid
+// ValidateGCSPath checks if a GCS or BigQuery path is valid
 func ValidateGCSPath(path string) error {
 	if path == "" {
-		return fmt.Errorf("GCS path cannot be empty")
+		return fmt.Errorf("path cannot be empty")
 	}
 
+	// Check for BigQuery path
+	if strings.HasPrefix(path, "bq://") {
+		return ValidateBQPath(path)
+	}
+
+	// Check for GCS path
 	if !strings.HasPrefix(path, "gs://") {
-		return fmt.Errorf("GCS path must start with 'gs://'")
+		return fmt.Errorf("path must start with 'gs://' or 'bq://'")
 	}
 
 	if path == "gs://" {
@@ -77,6 +83,42 @@ func ValidateGCSPath(path string) error {
 
 	if strings.Contains(bucketName, "..") {
 		return fmt.Errorf("bucket name cannot contain '..'")
+	}
+
+	return nil
+}
+
+// ValidateBQPath checks if a BigQuery path is valid
+func ValidateBQPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("BigQuery path cannot be empty")
+	}
+
+	if !strings.HasPrefix(path, "bq://") {
+		return fmt.Errorf("BigQuery path must start with 'bq://'")
+	}
+
+	if path == "bq://" {
+		return fmt.Errorf("BigQuery path must include a project ID")
+	}
+
+	// Extract path components
+	pathWithoutPrefix := strings.TrimPrefix(path, "bq://")
+	parts := strings.Split(pathWithoutPrefix, ".")
+
+	// Validate project ID (first component)
+	if len(parts) == 0 || parts[0] == "" {
+		return fmt.Errorf("BigQuery path must include a project ID")
+	}
+
+	// Project ID validation (basic validation)
+	projectID := parts[0]
+	if len(projectID) < 6 || len(projectID) > 30 {
+		return fmt.Errorf("project ID must be between 6 and 30 characters")
+	}
+
+	if !regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`).MatchString(projectID) {
+		return fmt.Errorf("invalid project ID %q", projectID)
 	}
 
 	return nil

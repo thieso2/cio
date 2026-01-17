@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/internal/resolver"
-	"github.com/thieso2/cio/internal/storage"
+	"github.com/thieso2/cio/internal/resource"
 )
 
 var (
@@ -19,75 +19,99 @@ var (
 
 var lsCmd = &cobra.Command{
 	Use:   "ls <path>",
-	Short: "List GCS objects",
-	Long: `List objects in a GCS bucket using an alias or full gs:// path.
+	Short: "List GCS buckets/objects or BigQuery datasets/tables",
+	Long: `List GCS buckets, objects, or BigQuery datasets/tables using an alias or full path.
 
 The path can be either:
-  - An alias: 'am', 'am/2024/', 'am/2024/01/data.txt'
+  - An alias (with : prefix): ':am', ':am/2024/', ':am/2024/01/data.txt'
   - A full GCS path: 'gs://bucket-name/', 'gs://bucket-name/prefix/'
+  - List all buckets: 'gs://project-id:' (note the colon at the end)
+  - A full BigQuery path: 'bq://project-id', 'bq://project-id.dataset'
+  - List all datasets: 'bq://' (uses default project from config)
+  - Wildcard pattern: ':am/logs/*.log', ':am/data/2024-*.csv'
 
-Examples:
-  # List top-level of mapped bucket
-  cio ls am
+Examples (GCS):
+  # List buckets in a project
+  cio ls 'gs://my-project-id:'
 
-  # List with details
-  cio ls -l am
+  # List objects in bucket
+  cio ls :am
+  cio ls -l :am/2024/
+  cio ls ':am/logs/*.log'
 
-  # List with human-readable sizes
-  cio ls -l --human-readable am/2024/
+Examples (BigQuery):
+  # List datasets in default project
+  cio ls bq://
 
-  # List recursively
-  cio ls -r am/2024/
+  # List datasets in specific project
+  cio ls bq://my-project-id
 
-  # List recursively with all details
-  cio ls -lr --human-readable am/2024/
-
-  # List using full GCS path
-  cio ls gs://my-bucket/path/`,
+  # List tables in dataset
+  cio ls :mydata
+  cio ls ':mydata.events_*'`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		// Resolve alias to full GCS path if needed
+		// Resolve alias to full path if needed
 		r := resolver.New(cfg)
-		gcsPath, err := r.Resolve(path)
+		var fullPath string
+		var err error
+
+		// If it's already a gs:// or bq:// path, use it directly
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
+			fullPath = path
+		} else {
+			fullPath, err = r.Resolve(path)
+			if err != nil {
+				return err
+			}
+		}
+
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Listing: %s\n", fullPath)
+		}
+
+		ctx := context.Background()
+
+		// Create resource factory
+		factory := resource.NewFactory(r.ReverseResolve)
+
+		// Get appropriate resource handler
+		res, err := factory.Create(fullPath)
 		if err != nil {
 			return err
 		}
 
-		if verbose {
-			fmt.Fprintf(os.Stderr, "Listing: %s\n", gcsPath)
-		}
-
-		// Configure list options
-		opts := &storage.ListOptions{
+		// List resources
+		options := &resource.ListOptions{
 			Recursive:     lsRecursive,
 			LongFormat:    lsLongFormat,
 			HumanReadable: lsHumanReadable,
 			MaxResults:    lsMaxResults,
+			ProjectID:     cfg.Defaults.ProjectID,
 		}
 
-		// List objects
-		ctx := context.Background()
-		objects, err := storage.ListByPath(ctx, gcsPath, opts)
+		resources, err := res.List(ctx, fullPath, options)
 		if err != nil {
-			return fmt.Errorf("failed to list objects: %w", err)
+			return fmt.Errorf("failed to list resources: %w", err)
 		}
 
 		// Handle empty results
-		if len(objects) == 0 {
+		if len(resources) == 0 {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "No objects found\n")
+				fmt.Fprintf(os.Stderr, "No resources found\n")
 			}
 			return nil
 		}
 
 		// Print results
-		for _, obj := range objects {
+		for _, info := range resources {
+			aliasPath := r.ReverseResolve(info.Path)
 			if lsLongFormat {
-				fmt.Println(obj.FormatLong(lsHumanReadable))
+				fmt.Println(res.FormatLong(info, aliasPath))
 			} else {
-				fmt.Println(obj.FormatShort())
+				fmt.Println(res.FormatShort(info, aliasPath))
 			}
 		}
 

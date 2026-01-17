@@ -39,6 +39,14 @@ func (oi *ObjectInfo) FormatShort() string {
 	return oi.Path
 }
 
+// FormatShortWithAlias formats object info in short format with alias substitution
+func (oi *ObjectInfo) FormatShortWithAlias(aliasPath string) string {
+	if aliasPath != "" {
+		return aliasPath
+	}
+	return oi.Path
+}
+
 // FormatLong formats object info in long format (matching gcloud storage ls -l)
 func (oi *ObjectInfo) FormatLong(humanReadable bool) string {
 	if oi.IsPrefix {
@@ -59,6 +67,35 @@ func (oi *ObjectInfo) FormatLong(humanReadable bool) string {
 	}
 
 	return fmt.Sprintf("%s  %s  %s", timestamp, size, oi.Path)
+}
+
+// FormatLongWithAlias formats object info in long format with alias substitution
+func (oi *ObjectInfo) FormatLongWithAlias(humanReadable bool, aliasPath string) string {
+	if oi.IsPrefix {
+		if aliasPath != "" {
+			return aliasPath
+		}
+		return oi.Path
+	}
+
+	timestamp := oi.Updated.Format(time.RFC3339)
+
+	var size string
+	if humanReadable {
+		size = FormatSize(oi.Size)
+		// Pad size to align columns (15 chars)
+		size = fmt.Sprintf("%-15s", size)
+	} else {
+		// Pad size to align columns (15 chars)
+		size = fmt.Sprintf("%-15d", oi.Size)
+	}
+
+	displayPath := oi.Path
+	if aliasPath != "" {
+		displayPath = aliasPath
+	}
+
+	return fmt.Sprintf("%s  %s  %s", timestamp, size, displayPath)
 }
 
 // NewObjectInfo creates ObjectInfo from a storage.ObjectAttrs

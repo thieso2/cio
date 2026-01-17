@@ -12,52 +12,63 @@ import (
 
 var mapCmd = &cobra.Command{
 	Use:   "map",
-	Short: "Manage GCS bucket mappings",
-	Long: `Manage alias mappings to GCS bucket paths.
+	Short: "Manage GCS and BigQuery path mappings",
+	Long: `Manage alias mappings to GCS bucket paths and BigQuery datasets.
 
-Mappings allow you to use short aliases instead of full gs:// paths.
-For example, mapping 'am' to 'gs://my-bucket/' lets you use 'cio ls am'
-instead of 'cio ls gs://my-bucket/'.`,
+Mappings allow you to use short aliases instead of full gs:// or bq:// paths.
+
+Examples:
+  GCS:      mapping 'am' to 'gs://my-bucket/' lets you use 'cio ls :am'
+  BigQuery: mapping 'mydata' to 'bq://project.dataset' lets you use 'cio ls :mydata'
+
+Note: Aliases are created without the : prefix, but must be used with it.`,
 }
 
 var mapAddCmd = &cobra.Command{
-	Use:   "map <alias> <gs-path>",
+	Use:   "map <alias> <path>",
 	Short: "Create or update a mapping",
-	Long: `Create or update an alias mapping to a GCS path.
+	Long: `Create or update an alias mapping to a GCS or BigQuery path.
 
 Examples:
+  # GCS mappings
   cio map am gs://io-spooler-onprem-archived-metrics/
   cio map logs gs://my-project-logs/
-  cio map data gs://my-data-bucket/raw/`,
+  cio map data gs://my-data-bucket/raw/
+
+  # BigQuery mappings
+  cio map mydata bq://my-project-id.my-dataset
+  cio map analytics bq://prod-project.analytics_data`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
-		gcsPath := args[1]
+		path := args[1]
 
 		// Validate alias
 		if err := resolver.ValidateAlias(alias); err != nil {
 			return err
 		}
 
-		// Validate GCS path
-		if err := resolver.ValidateGCSPath(gcsPath); err != nil {
+		// Validate path (supports both gs:// and bq://)
+		if err := resolver.ValidateGCSPath(path); err != nil {
 			return err
 		}
 
-		// Normalize path (ensure trailing /)
-		gcsPath = resolver.NormalizePath(gcsPath)
+		// Normalize path only for GCS (BigQuery doesn't need trailing slash)
+		if resolver.IsGCSPath(path) {
+			path = resolver.NormalizePath(path)
+		}
 
 		// Check if alias already exists
 		if existingPath, exists := cfg.GetMapping(alias); exists {
 			fmt.Printf("Updating mapping: %s\n", alias)
 			fmt.Printf("  Old: %s\n", existingPath)
-			fmt.Printf("  New: %s\n", gcsPath)
+			fmt.Printf("  New: %s\n", path)
 		} else {
-			fmt.Printf("Creating mapping: %s -> %s\n", alias, gcsPath)
+			fmt.Printf("Creating mapping: %s -> %s\n", alias, path)
 		}
 
 		// Add mapping
-		cfg.AddMapping(alias, gcsPath)
+		cfg.AddMapping(alias, path)
 
 		// Save config
 		if err := cfg.Save(); err != nil {
@@ -91,8 +102,8 @@ var mapListCmd = &cobra.Command{
 
 		// Print mappings in a table
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ALIAS\tGCS PATH")
-		fmt.Fprintln(w, "-----\t--------")
+		fmt.Fprintln(w, "ALIAS\tPATH")
+		fmt.Fprintln(w, "-----\t----")
 
 		for _, alias := range aliases {
 			fmt.Fprintf(w, "%s\t%s\n", alias, mappings[alias])
@@ -106,7 +117,7 @@ var mapListCmd = &cobra.Command{
 var mapShowCmd = &cobra.Command{
 	Use:   "show <alias>",
 	Short: "Show the full path for an alias",
-	Long:  `Display the full GCS path for a given alias.`,
+	Long:  `Display the full GCS or BigQuery path for a given alias.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]

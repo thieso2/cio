@@ -96,6 +96,46 @@ func ListByPath(ctx context.Context, gcsPath string, opts *ListOptions) ([]*Obje
 	return List(ctx, bucket, prefix, opts)
 }
 
+// ListWithPattern lists objects matching a wildcard pattern
+func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
+	// Extract prefix and wildcard pattern
+	prefix, wildcardPattern := splitPattern(pattern)
+
+	// List all objects with the prefix
+	allObjects, err := List(ctx, bucket, prefix, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter objects that match the pattern
+	var results []*ObjectInfo
+	for _, obj := range allObjects {
+		// Skip prefixes/directories
+		if obj.IsPrefix {
+			continue
+		}
+
+		// Extract object name from path (gs://bucket/object -> object)
+		pathParts := strings.SplitN(obj.Path, "/", 4)
+		if len(pathParts) < 4 {
+			continue
+		}
+		objectName := pathParts[3]
+
+		// Get just the filename from the full path
+		name := objectName
+		if strings.HasPrefix(name, prefix) {
+			name = strings.TrimPrefix(name, prefix)
+		}
+
+		if matchesPattern(name, wildcardPattern) {
+			results = append(results, obj)
+		}
+	}
+
+	return results, nil
+}
+
 // parseGCSPath parses a gs:// path into bucket and prefix
 func parseGCSPath(gcsPath string) (bucket, prefix string, err error) {
 	if !strings.HasPrefix(gcsPath, "gs://") {
@@ -115,6 +155,14 @@ func parseGCSPath(gcsPath string) (bucket, prefix string, err error) {
 
 	if len(parts) > 1 {
 		prefix = parts[1]
+	}
+
+	// Check if bucket contains a colon (project-id prefix)
+	// If it contains ":" but doesn't end with it, strip the project-id prefix
+	// This handles paths like gs://project-id:bucket-name/path
+	if strings.Contains(bucket, ":") && !strings.HasSuffix(bucket, ":") {
+		colonIdx := strings.Index(bucket, ":")
+		bucket = bucket[colonIdx+1:]
 	}
 
 	return bucket, prefix, nil

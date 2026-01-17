@@ -27,18 +27,20 @@ var rootCmd = &cobra.Command{
 with short aliases and provides a built-in webserver for browsing and managing
 GCS buckets.
 
+Aliases are prefixed with : to distinguish them from regular paths.
+
 Examples:
   # Create a mapping
   cio map am gs://io-spooler-onprem-archived-metrics/
 
   # List bucket contents
-  cio ls am
+  cio ls :am
 
   # List with details
-  cio ls -l am/2024/
+  cio ls -l :am/2024/
 
   # List recursively with human-readable sizes
-  cio ls -lr --human-readable am/2024/`,
+  cio ls -lr --human-readable :am/2024/`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.Load(cfgFile)
