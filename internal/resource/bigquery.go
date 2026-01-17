@@ -14,8 +14,8 @@ type BigQueryResource struct {
 	formatter PathFormatter
 }
 
-// NewBigQueryResource creates a new BigQuery resource handler
-func NewBigQueryResource(formatter PathFormatter) *BigQueryResource {
+// CreateBigQueryResource creates a new BigQuery resource handler
+func CreateBigQueryResource(formatter PathFormatter) *BigQueryResource {
 	return &BigQueryResource{
 		formatter: formatter,
 	}

@@ -55,7 +55,7 @@ Examples (BigQuery):
 		path := args[0]
 
 		// Resolve alias to full path if needed
-		r := resolver.New(cfg)
+		r := resolver.Create(cfg)
 		var fullPath string
 		var err error
 		var inputWasAlias bool
@@ -79,7 +79,7 @@ Examples (BigQuery):
 		ctx := context.Background()
 
 		// Create resource factory
-		factory := resource.NewFactory(r.ReverseResolve)
+		factory := resource.CreateFactory(r.ReverseResolve)
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)

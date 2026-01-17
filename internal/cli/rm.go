@@ -35,7 +35,7 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 		path := args[0]
 
 		// Resolve alias
-		r := resolver.New(cfg)
+		r := resolver.Create(cfg)
 		fullPath, err := r.Resolve(path)
 		if err != nil {
 			return fmt.Errorf("failed to resolve path: %w", err)
@@ -44,7 +44,7 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 		ctx := context.Background()
 
 		// Create resource factory
-		factory := resource.NewFactory(r.ReverseResolve)
+		factory := resource.CreateFactory(r.ReverseResolve)
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)

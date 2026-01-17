@@ -12,8 +12,8 @@ type Resolver struct {
 	config *config.Config
 }
 
-// New creates a new Resolver instance
-func New(cfg *config.Config) *Resolver {
+// Create creates a new Resolver instance
+func Create(cfg *config.Config) *Resolver {
 	return &Resolver{
 		config: cfg,
 	}

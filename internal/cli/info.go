@@ -24,7 +24,7 @@ Examples:
 		path := args[0]
 
 		// Resolve alias to full path if needed
-		r := resolver.New(cfg)
+		r := resolver.Create(cfg)
 		fullPath, err := r.Resolve(path)
 		if err != nil {
 			return err
@@ -33,7 +33,7 @@ Examples:
 		ctx := context.Background()
 
 		// Create resource factory
-		factory := resource.NewFactory(r.ReverseResolve)
+		factory := resource.CreateFactory(r.ReverseResolve)
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)

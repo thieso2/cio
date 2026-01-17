@@ -64,7 +64,7 @@ func runCp(cmd *cobra.Command, args []string) error {
 	destIsLocal := !resolver.IsGCSPath(destination)
 
 	// Resolve aliases
-	r := resolver.New(cfg)
+	r := resolver.Create(cfg)
 
 	var sourcePath, destPath string
 	var err error
@@ -117,7 +117,7 @@ func uploadPath(ctx context.Context, client *gcs.Client, localPath, gcsPath stri
 	}
 
 	// Create path formatter using resolver
-	r := resolver.New(cfg)
+	r := resolver.Create(cfg)
 	formatter := r.ReverseResolve
 
 	if fileInfo.IsDir() {
@@ -138,7 +138,7 @@ func downloadPath(ctx context.Context, client *gcs.Client, gcsPath, localPath st
 	}
 
 	// Create path formatter using resolver
-	r := resolver.New(cfg)
+	r := resolver.Create(cfg)
 	formatter := r.ReverseResolve
 
 	// Check if path contains wildcards

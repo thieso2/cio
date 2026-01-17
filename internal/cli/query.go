@@ -148,7 +148,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 // resolveAliasesInSQL replaces :alias references with full BigQuery paths
 func resolveAliasesInSQL(sql string, cfg *config.Config) (string, error) {
-	r := resolver.New(cfg)
+	r := resolver.Create(cfg)
 
 	// Find all words that start with :
 	words := strings.Fields(sql)

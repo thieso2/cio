@@ -13,8 +13,8 @@ type GCSResource struct {
 	formatter PathFormatter
 }
 
-// NewGCSResource creates a new GCS resource handler
-func NewGCSResource(formatter PathFormatter) *GCSResource {
+// CreateGCSResource creates a new GCS resource handler
+func CreateGCSResource(formatter PathFormatter) *GCSResource {
 	return &GCSResource{
 		formatter: formatter,
 	}

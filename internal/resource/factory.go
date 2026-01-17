@@ -11,8 +11,8 @@ type Factory struct {
 	formatter PathFormatter
 }
 
-// NewFactory creates a new resource factory
-func NewFactory(formatter PathFormatter) *Factory {
+// CreateFactory creates a new resource factory
+func CreateFactory(formatter PathFormatter) *Factory {
 	return &Factory{
 		formatter: formatter,
 	}
@@ -21,11 +21,11 @@ func NewFactory(formatter PathFormatter) *Factory {
 // Create creates the appropriate resource handler for the given path
 func (f *Factory) Create(path string) (Resource, error) {
 	if resolver.IsBQPath(path) {
-		return NewBigQueryResource(f.formatter), nil
+		return CreateBigQueryResource(f.formatter), nil
 	}
 
 	if resolver.IsGCSPath(path) {
-		return NewGCSResource(f.formatter), nil
+		return CreateGCSResource(f.formatter), nil
 	}
 
 	return nil, fmt.Errorf("unknown resource type for path: %s", path)
@@ -35,9 +35,9 @@ func (f *Factory) Create(path string) (Resource, error) {
 func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
 	switch resourceType {
 	case TypeGCS:
-		return NewGCSResource(f.formatter), nil
+		return CreateGCSResource(f.formatter), nil
 	case TypeBigQuery:
-		return NewBigQueryResource(f.formatter), nil
+		return CreateBigQueryResource(f.formatter), nil
 	default:
 		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
 	}

@@ -98,8 +98,8 @@ func (oi *ObjectInfo) FormatLongWithAlias(humanReadable bool, aliasPath string) 
 	return fmt.Sprintf("%s  %s  %s", timestamp, size, displayPath)
 }
 
-// NewObjectInfo creates ObjectInfo from a storage.ObjectAttrs
-func NewObjectInfo(attrs *storage.ObjectAttrs, bucketName string) *ObjectInfo {
+// CreateObjectInfo creates ObjectInfo from a storage.ObjectAttrs
+func CreateObjectInfo(attrs *storage.ObjectAttrs, bucketName string) *ObjectInfo {
 	return &ObjectInfo{
 		Path:         fmt.Sprintf("gs://%s/%s", bucketName, attrs.Name),
 		Size:         attrs.Size,
@@ -110,8 +110,8 @@ func NewObjectInfo(attrs *storage.ObjectAttrs, bucketName string) *ObjectInfo {
 	}
 }
 
-// NewPrefixInfo creates ObjectInfo for a prefix (directory)
-func NewPrefixInfo(prefix, bucketName string) *ObjectInfo {
+// CreatePrefixInfo creates ObjectInfo for a prefix (directory)
+func CreatePrefixInfo(prefix, bucketName string) *ObjectInfo {
 	gcsPath := fmt.Sprintf("gs://%s/%s", bucketName, prefix)
 	return &ObjectInfo{
 		Path:     gcsPath,

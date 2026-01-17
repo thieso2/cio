@@ -73,13 +73,13 @@ func List(ctx context.Context, bucket, prefix string, opts *ListOptions) ([]*Obj
 
 		// Handle prefixes (directories)
 		if attrs.Prefix != "" {
-			results = append(results, NewPrefixInfo(attrs.Prefix, bucket))
+			results = append(results, CreatePrefixInfo(attrs.Prefix, bucket))
 			count++
 			continue
 		}
 
 		// Handle objects
-		results = append(results, NewObjectInfo(attrs, bucket))
+		results = append(results, CreateObjectInfo(attrs, bucket))
 		count++
 	}
 
