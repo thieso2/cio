@@ -36,15 +36,34 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 
 		// Resolve alias
 		r := resolver.Create(cfg)
-		fullPath, err := r.Resolve(path)
-		if err != nil {
-			return fmt.Errorf("failed to resolve path: %w", err)
+		var fullPath string
+		var err error
+		var inputWasAlias bool
+
+		// If it's already a gs:// or bq:// path, use it directly
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
+			fullPath = path
+			inputWasAlias = false
+		} else {
+			fullPath, err = r.Resolve(path)
+			if err != nil {
+				return fmt.Errorf("failed to resolve path: %w", err)
+			}
+			inputWasAlias = true // User provided an alias
 		}
 
 		ctx := context.Background()
 
-		// Create resource factory
-		factory := resource.CreateFactory(r.ReverseResolve)
+		// Create resource factory with appropriate formatter
+		// Only use reverse resolver if input was an alias
+		var formatter resource.PathFormatter
+		if inputWasAlias {
+			formatter = r.ReverseResolve
+		} else {
+			// Use identity formatter (returns path as-is)
+			formatter = func(path string) string { return path }
+		}
+		factory := resource.CreateFactory(formatter)
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)
@@ -58,7 +77,11 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 			return err
 		}
 
-		displayPath := r.ReverseResolve(fullPath)
+		// Only reverse-map if input was an alias
+		displayPath := fullPath
+		if inputWasAlias {
+			displayPath = r.ReverseResolve(fullPath)
+		}
 
 		// Check for wildcards and list matching resources first
 		hasWildcard := false
@@ -88,8 +111,12 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 
 			fmt.Printf("Found %d matching %s:\n", len(resources), resourceWord)
 			for _, info := range resources {
-				aliasPath := r.ReverseResolve(info.Path)
-				fmt.Printf("  - %s\n", aliasPath)
+				// Only reverse-map if input was an alias
+				displayResourcePath := info.Path
+				if inputWasAlias {
+					displayResourcePath = r.ReverseResolve(info.Path)
+				}
+				fmt.Printf("  - %s\n", displayResourcePath)
 			}
 			fmt.Println()
 
