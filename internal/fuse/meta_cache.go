@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,7 +16,8 @@ const (
 	MetadataCacheTTL = 5 * time.Minute
 )
 
-// MetadataCache provides persistent disk caching for GCS metadata
+// MetadataCache provides persistent disk caching for Google Cloud resource metadata
+// Supports GCS (buckets, objects), BigQuery (datasets, tables), and other GCP services
 type MetadataCache struct {
 	mu       sync.RWMutex
 	cacheDir string
@@ -72,14 +74,25 @@ func (c *MetadataCache) getBQCachePath(projectID, datasetID, tableID string) str
 	return filepath.Join(c.cacheDir, fmt.Sprintf("bq_project_%s.json", projectID))
 }
 
-// GetBucketMetadata gets bucket metadata from cache or generates it
-func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string, generator func() ([]byte, error)) ([]byte, error) {
+// Get is a generic cache method that works for all Google Cloud resource types
+// The cacheKey should uniquely identify the resource (e.g., "gcs:bucket:name", "bq:table:project.dataset.table")
+// The generator function is called only on cache miss and should return the metadata as JSON bytes
+func (c *MetadataCache) Get(ctx context.Context, cacheKey string, generator func() ([]byte, error)) ([]byte, error) {
 	start := time.Now()
 	if !c.enabled {
 		return generator()
 	}
 
-	cachePath := c.getCachePath(bucketName, "", true)
+	// Generate cache file path from key
+	// Replace colons, slashes, and dots with underscores for safe filenames
+	safeKey := cacheKey
+	safeKey = strings.ReplaceAll(safeKey, ":", "_")
+	safeKey = strings.ReplaceAll(safeKey, "/", "_")
+	safeKey = strings.ReplaceAll(safeKey, ".", "_")
+	if len(safeKey) > 200 {
+		safeKey = safeKey[:200]
+	}
+	cachePath := filepath.Join(c.cacheDir, fmt.Sprintf("%s.json", safeKey))
 
 	// Try to read from cache
 	c.mu.RLock()
@@ -91,7 +104,7 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 		if json.Unmarshal(data, &cached) == nil {
 			// Check if cache is still valid
 			if time.Now().Before(cached.ExpiresAt) {
-				logGC("CacheHit", start, "bucket", bucketName, "type", "metadata")
+				logGC("CacheHit", start, "key", cacheKey)
 				// Re-prettify the JSON data before returning
 				var metadata map[string]interface{}
 				if json.Unmarshal(cached.Data, &metadata) == nil {
@@ -102,13 +115,13 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 				// Fallback to raw data if prettification fails
 				return cached.Data, nil
 			} else {
-				logGC("CacheExpired", start, "bucket", bucketName, "type", "metadata")
+				logGC("CacheExpired", start, "key", cacheKey)
 			}
 		}
 	}
 
 	// Cache miss or expired - generate new metadata
-	logGC("CacheMiss", start, "bucket", bucketName, "type", "metadata")
+	logGC("CacheMiss", start, "key", cacheKey)
 	metadata, err := generator()
 	if err != nil {
 		return nil, err
@@ -126,70 +139,24 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 
 	if cacheData, err := json.Marshal(cached); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
-		logGC("CacheSave", start, "bucket", bucketName, "type", "metadata")
+		logGC("CacheSave", start, "key", cacheKey)
 	}
 
 	return metadata, nil
 }
 
+// GetBucketMetadata gets bucket metadata from cache or generates it
+// Uses the generic Get() method with a bucket-specific cache key
+func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string, generator func() ([]byte, error)) ([]byte, error) {
+	cacheKey := fmt.Sprintf("gcs:bucket:%s", bucketName)
+	return c.Get(ctx, cacheKey, generator)
+}
+
 // GetObjectMetadata gets object metadata from cache or generates it
+// Uses the generic Get() method with an object-specific cache key
 func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objectName string, generator func() ([]byte, error)) ([]byte, error) {
-	start := time.Now()
-	if !c.enabled {
-		return generator()
-	}
-
-	cachePath := c.getCachePath(bucketName, objectName, false)
-
-	// Try to read from cache
-	c.mu.RLock()
-	data, err := os.ReadFile(cachePath)
-	c.mu.RUnlock()
-
-	if err == nil {
-		var cached cachedMetadata
-		if json.Unmarshal(data, &cached) == nil {
-			// Check if cache is still valid
-			if time.Now().Before(cached.ExpiresAt) {
-				logGC("CacheHit", start, "object", objectName, "type", "metadata")
-				// Re-prettify the JSON data before returning
-				var metadata map[string]interface{}
-				if json.Unmarshal(cached.Data, &metadata) == nil {
-					if prettyData, err := json.MarshalIndent(metadata, "", "  "); err == nil {
-						return prettyData, nil
-					}
-				}
-				// Fallback to raw data if prettification fails
-				return cached.Data, nil
-			} else {
-				logGC("CacheExpired", start, "object", objectName, "type", "metadata")
-			}
-		}
-	}
-
-	// Cache miss or expired - generate new metadata
-	logGC("CacheMiss", start, "object", objectName, "type", "metadata")
-	metadata, err := generator()
-	if err != nil {
-		return nil, err
-	}
-
-	// Save to cache
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	cached := cachedMetadata{
-		Data:      metadata,
-		CachedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(MetadataCacheTTL),
-	}
-
-	if cacheData, err := json.Marshal(cached); err == nil {
-		os.WriteFile(cachePath, cacheData, 0644)
-		logGC("CacheSave", start, "object", objectName, "type", "metadata")
-	}
-
-	return metadata, nil
+	cacheKey := fmt.Sprintf("gcs:object:%s/%s", bucketName, objectName)
+	return c.Get(ctx, cacheKey, generator)
 }
 
 // InvalidateBucket invalidates all cached metadata for a bucket
@@ -230,63 +197,10 @@ func (c *MetadataCache) InvalidateAll() {
 }
 
 // GetTableMetadata gets BigQuery table metadata from cache or generates it
+// Uses the generic Get() method with a table-specific cache key
 func (c *MetadataCache) GetTableMetadata(ctx context.Context, projectID, datasetID, tableID string, generator func() ([]byte, error)) ([]byte, error) {
-	start := time.Now()
-	if !c.enabled {
-		return generator()
-	}
-
-	cachePath := c.getBQCachePath(projectID, datasetID, tableID)
-
-	// Try to read from cache
-	c.mu.RLock()
-	data, err := os.ReadFile(cachePath)
-	c.mu.RUnlock()
-
-	if err == nil {
-		var cached cachedMetadata
-		if json.Unmarshal(data, &cached) == nil {
-			// Check if cache is still valid
-			if time.Now().Before(cached.ExpiresAt) {
-				logGC("CacheHit", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
-				// Re-prettify the JSON data before returning
-				var metadata map[string]interface{}
-				if json.Unmarshal(cached.Data, &metadata) == nil {
-					if prettyData, err := json.MarshalIndent(metadata, "", "  "); err == nil {
-						return prettyData, nil
-					}
-				}
-				// Fallback to raw data if prettification fails
-				return cached.Data, nil
-			} else {
-				logGC("CacheExpired", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
-			}
-		}
-	}
-
-	// Cache miss or expired - generate new metadata
-	logGC("CacheMiss", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
-	metadata, err := generator()
-	if err != nil {
-		return nil, err
-	}
-
-	// Save to cache
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	cached := cachedMetadata{
-		Data:      metadata,
-		CachedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(MetadataCacheTTL),
-	}
-
-	if cacheData, err := json.Marshal(cached); err == nil {
-		os.WriteFile(cachePath, cacheData, 0644)
-		logGC("CacheSave", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
-	}
-
-	return metadata, nil
+	cacheKey := fmt.Sprintf("bq:table:%s.%s.%s", projectID, datasetID, tableID)
+	return c.Get(ctx, cacheKey, generator)
 }
 
 // InvalidateDataset invalidates all cached metadata for a BigQuery dataset
