@@ -63,6 +63,7 @@ func (c *MetadataCache) getCachePath(bucketName, objectName string, isBucket boo
 
 // GetBucketMetadata gets bucket metadata from cache or generates it
 func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string, generator func() ([]byte, error)) ([]byte, error) {
+	start := time.Now()
 	if !c.enabled {
 		return generator()
 	}
@@ -79,12 +80,24 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 		if json.Unmarshal(data, &cached) == nil {
 			// Check if cache is still valid
 			if time.Now().Before(cached.ExpiresAt) {
+				logGCS("CacheHit", start, "bucket", bucketName, "type", "metadata")
+				// Re-prettify the JSON data before returning
+				var metadata map[string]interface{}
+				if json.Unmarshal(cached.Data, &metadata) == nil {
+					if prettyData, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+						return prettyData, nil
+					}
+				}
+				// Fallback to raw data if prettification fails
 				return cached.Data, nil
+			} else {
+				logGCS("CacheExpired", start, "bucket", bucketName, "type", "metadata")
 			}
 		}
 	}
 
 	// Cache miss or expired - generate new metadata
+	logGCS("CacheMiss", start, "bucket", bucketName, "type", "metadata")
 	metadata, err := generator()
 	if err != nil {
 		return nil, err
@@ -100,8 +113,9 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 		ExpiresAt: time.Now().Add(MetadataCacheTTL),
 	}
 
-	if cacheData, err := json.MarshalIndent(cached, "", "  "); err == nil {
+	if cacheData, err := json.Marshal(cached); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
+		logGCS("CacheSave", start, "bucket", bucketName, "type", "metadata")
 	}
 
 	return metadata, nil
@@ -109,6 +123,7 @@ func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string
 
 // GetObjectMetadata gets object metadata from cache or generates it
 func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objectName string, generator func() ([]byte, error)) ([]byte, error) {
+	start := time.Now()
 	if !c.enabled {
 		return generator()
 	}
@@ -125,12 +140,24 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 		if json.Unmarshal(data, &cached) == nil {
 			// Check if cache is still valid
 			if time.Now().Before(cached.ExpiresAt) {
+				logGCS("CacheHit", start, "object", objectName, "type", "metadata")
+				// Re-prettify the JSON data before returning
+				var metadata map[string]interface{}
+				if json.Unmarshal(cached.Data, &metadata) == nil {
+					if prettyData, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+						return prettyData, nil
+					}
+				}
+				// Fallback to raw data if prettification fails
 				return cached.Data, nil
+			} else {
+				logGCS("CacheExpired", start, "object", objectName, "type", "metadata")
 			}
 		}
 	}
 
 	// Cache miss or expired - generate new metadata
+	logGCS("CacheMiss", start, "object", objectName, "type", "metadata")
 	metadata, err := generator()
 	if err != nil {
 		return nil, err
@@ -146,8 +173,9 @@ func (c *MetadataCache) GetObjectMetadata(ctx context.Context, bucketName, objec
 		ExpiresAt: time.Now().Add(MetadataCacheTTL),
 	}
 
-	if cacheData, err := json.MarshalIndent(cached, "", "  "); err == nil {
+	if cacheData, err := json.Marshal(cached); err == nil {
 		os.WriteFile(cachePath, cacheData, 0644)
+		logGCS("CacheSave", start, "object", objectName, "type", "metadata")
 	}
 
 	return metadata, nil
