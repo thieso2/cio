@@ -190,6 +190,12 @@ func (g *GCSResource) FormatDetailed(info *ResourceInfo, aliasPath string) strin
 	return g.FormatLong(info, aliasPath)
 }
 
+// FormatLongHeader returns the header line for long format listing
+func (g *GCSResource) FormatLongHeader() string {
+	// GCS doesn't use a header for now
+	return ""
+}
+
 // SupportsInfo returns whether GCS supports the info command
 func (g *GCSResource) SupportsInfo() bool {
 	return false

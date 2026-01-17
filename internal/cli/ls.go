@@ -113,6 +113,14 @@ Examples (BigQuery):
 		// Only reverse-map if: input was an alias AND --no-map flag is not set
 		shouldReverseMap := inputWasAlias && !lsNoMap
 
+		// Print header for long format if resource type provides one
+		if lsLongFormat {
+			header := res.FormatLongHeader()
+			if header != "" {
+				fmt.Println(header)
+			}
+		}
+
 		// Print results
 		for _, info := range resources {
 			displayPath := info.Path

@@ -206,6 +206,11 @@ func (b *BigQueryResource) FormatDetailed(info *ResourceInfo, aliasPath string) 
 	return aliasPath
 }
 
+// FormatLongHeader returns the header line for long format listing
+func (b *BigQueryResource) FormatLongHeader() string {
+	return bigquery.FormatLongHeader()
+}
+
 // SupportsInfo returns whether BigQuery supports the info command
 func (b *BigQueryResource) SupportsInfo() bool {
 	return true

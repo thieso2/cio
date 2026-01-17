@@ -63,7 +63,12 @@ func (bi *BQObjectInfo) FormatLongWithAlias(aliasPath string) string {
 		rows = "-"
 	}
 
-	return fmt.Sprintf("%-8s  %-15s  %-20s  %s", bi.Type, size, rows, aliasPath)
+	return fmt.Sprintf("%-8s  %15s  %20s  %s", bi.Type, size, rows, aliasPath)
+}
+
+// FormatLongHeader returns the header for long format listing
+func FormatLongHeader() string {
+	return fmt.Sprintf("%-8s  %15s  %20s  %s", "TYPE", "SIZE", "ROWS", "PATH")
 }
 
 // FormatDetailed formats BigQuery table info with schema details

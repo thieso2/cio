@@ -82,6 +82,9 @@ type Resource interface {
 	// FormatDetailed formats resource info with full details
 	FormatDetailed(info *ResourceInfo, aliasPath string) string
 
+	// FormatLongHeader returns the header line for long format (empty string if no header needed)
+	FormatLongHeader() string
+
 	// SupportsInfo returns whether this resource type supports detailed info
 	SupportsInfo() bool
 }
