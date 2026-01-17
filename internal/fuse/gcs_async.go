@@ -11,9 +11,21 @@ import (
 const (
 	// MaxConcurrentGCSCalls limits parallel GCS API calls
 	MaxConcurrentGCSCalls = 10
-	// ReadAheadBufferSize is the size of the read-ahead buffer in bytes
-	ReadAheadBufferSize = 1024 * 1024 // 1MB
+	// DefaultReadAheadSize is the default size of the read-ahead buffer in bytes
+	DefaultReadAheadSize = 5 * 1024 * 1024 // 5MB
 )
+
+var (
+	// ReadAheadBufferSize is the configurable size of the read-ahead buffer in bytes
+	ReadAheadBufferSize = DefaultReadAheadSize
+)
+
+// SetReadAheadBufferSize sets the read-ahead buffer size for GCS object reads
+func SetReadAheadBufferSize(size int) {
+	if size > 0 {
+		ReadAheadBufferSize = size
+	}
+}
 
 // objectResult holds the result of a parallel object fetch
 type objectResult struct {

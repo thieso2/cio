@@ -28,12 +28,13 @@ func logGCS(operation string, start time.Time, args ...interface{}) {
 
 // MountOptions contains configuration for mounting the FUSE filesystem
 type MountOptions struct {
-	ProjectID  string
-	Debug      bool
-	ReadOnly   bool
-	MountOpts  []string // Raw FUSE mount options (e.g., ["allow_other", "default_permissions"])
-	LogGCS     bool     // Enable GCS API call logging with timing
-	CleanCache bool     // Clear metadata cache on startup
+	ProjectID     string
+	Debug         bool
+	ReadOnly      bool
+	MountOpts     []string // Raw FUSE mount options (e.g., ["allow_other", "default_permissions"])
+	LogGCS        bool     // Enable GCS API call logging with timing
+	CleanCache    bool     // Clear metadata cache on startup
+	ReadAheadSize int      // Read-ahead buffer size in bytes (0 = use default 5MB)
 }
 
 // Server wraps the FUSE server and provides lifecycle management
@@ -61,6 +62,16 @@ func Mount(mountpoint string, opts MountOptions) (*Server, error) {
 		if opts.LogGCS {
 			log.Println("[GCS] Metadata cache cleared on startup")
 		}
+	}
+
+	// Configure read-ahead buffer size
+	if opts.ReadAheadSize > 0 {
+		SetReadAheadBufferSize(opts.ReadAheadSize)
+		if opts.LogGCS {
+			log.Printf("[GCS] Read-ahead buffer size set to %d bytes (%.1f MB)", opts.ReadAheadSize, float64(opts.ReadAheadSize)/(1024*1024))
+		}
+	} else if opts.LogGCS {
+		log.Printf("[GCS] Using default read-ahead buffer size: %d bytes (%.1f MB)", DefaultReadAheadSize, float64(DefaultReadAheadSize)/(1024*1024))
 	}
 
 	// Create root node

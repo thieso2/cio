@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -142,6 +143,10 @@ func (n *MetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse.E
 type BucketMetaFileNode struct {
 	fs.Inode
 	bucketName string
+	// Internal buffer for metadata content
+	bufferMu sync.Mutex
+	buffer   []byte
+	bufValid bool
 }
 
 var _ fs.NodeOpener = (*BucketMetaFileNode)(nil)
@@ -175,21 +180,30 @@ func (n *BucketMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *
 
 // Read reads the bucket metadata
 func (n *BucketMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	content, err := n.generateMetadata(ctx)
-	if err != nil {
-		return nil, MapGCPError(err)
+	n.bufferMu.Lock()
+	defer n.bufferMu.Unlock()
+
+	// Populate buffer on first read
+	if !n.bufValid {
+		content, err := n.generateMetadata(ctx)
+		if err != nil {
+			return nil, MapGCPError(err)
+		}
+		n.buffer = content
+		n.bufValid = true
 	}
 
-	if off >= int64(len(content)) {
+	// Serve from buffer
+	if off >= int64(len(n.buffer)) {
 		return fuse.ReadResultData(nil), 0
 	}
 
 	end := off + int64(len(dest))
-	if end > int64(len(content)) {
-		end = int64(len(content))
+	if end > int64(len(n.buffer)) {
+		end = int64(len(n.buffer))
 	}
 
-	return fuse.ReadResultData(content[off:end]), 0
+	return fuse.ReadResultData(n.buffer[off:end]), 0
 }
 
 // generateMetadata generates JSON metadata for the bucket (with caching)
@@ -229,6 +243,10 @@ type ObjectMetaFileNode struct {
 	fs.Inode
 	bucketName string
 	objectName string
+	// Internal buffer for metadata content
+	bufferMu sync.Mutex
+	buffer   []byte
+	bufValid bool
 }
 
 var _ fs.NodeOpener = (*ObjectMetaFileNode)(nil)
@@ -262,21 +280,30 @@ func (n *ObjectMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *
 
 // Read reads the object metadata
 func (n *ObjectMetaFileNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	content, err := n.generateMetadata(ctx)
-	if err != nil {
-		return nil, MapGCPError(err)
+	n.bufferMu.Lock()
+	defer n.bufferMu.Unlock()
+
+	// Populate buffer on first read
+	if !n.bufValid {
+		content, err := n.generateMetadata(ctx)
+		if err != nil {
+			return nil, MapGCPError(err)
+		}
+		n.buffer = content
+		n.bufValid = true
 	}
 
-	if off >= int64(len(content)) {
+	// Serve from buffer
+	if off >= int64(len(n.buffer)) {
 		return fuse.ReadResultData(nil), 0
 	}
 
 	end := off + int64(len(dest))
-	if end > int64(len(content)) {
-		end = int64(len(content))
+	if end > int64(len(n.buffer)) {
+		end = int64(len(n.buffer))
 	}
 
-	return fuse.ReadResultData(content[off:end]), 0
+	return fuse.ReadResultData(n.buffer[off:end]), 0
 }
 
 // generateMetadata generates JSON metadata for the object (with caching)

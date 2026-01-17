@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	mountDebug    bool
-	mountReadOnly bool
-	mountOptions  string // Comma-separated mount options (e.g., "allow_other,default_permissions")
-	logGCS        bool   // Log GCS API calls with timing
-	cleanCache    bool   // Clear metadata cache on startup
+	mountDebug     bool
+	mountReadOnly  bool
+	mountOptions   string // Comma-separated mount options (e.g., "allow_other,default_permissions")
+	logGCS         bool   // Log GCS API calls with timing
+	cleanCache     bool   // Clear metadata cache on startup
+	readAheadSizeMB int   // Read-ahead buffer size in MB (0 = use default 5MB)
 )
 
 var mountCmd = &cobra.Command{
@@ -81,12 +82,13 @@ To unmount:
 
 		// Create mount options
 		opts := fusepkg.MountOptions{
-			ProjectID:  cfg.Defaults.ProjectID,
-			Debug:      mountDebug,
-			ReadOnly:   mountReadOnly,
-			MountOpts:  mountOpts,
-			LogGCS:     logGCS,
-			CleanCache: cleanCache,
+			ProjectID:     cfg.Defaults.ProjectID,
+			Debug:         mountDebug,
+			ReadOnly:      mountReadOnly,
+			MountOpts:     mountOpts,
+			LogGCS:        logGCS,
+			CleanCache:    cleanCache,
+			ReadAheadSize: readAheadSizeMB * 1024 * 1024, // Convert MB to bytes
 		}
 
 		// Mount the filesystem
@@ -125,5 +127,6 @@ func init() {
 	mountCmd.Flags().StringVarP(&mountOptions, "options", "o", "", "Comma-separated FUSE mount options (e.g., allow_other,default_permissions)")
 	mountCmd.Flags().BoolVar(&logGCS, "log-gcs", false, "Log GCS API calls with timing information")
 	mountCmd.Flags().BoolVar(&cleanCache, "clean-cache", false, "Clear metadata cache on startup")
+	mountCmd.Flags().IntVar(&readAheadSizeMB, "read-ahead-mb", 0, "Read-ahead buffer size in MB (default: 5)")
 	rootCmd.AddCommand(mountCmd)
 }
