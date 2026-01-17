@@ -85,7 +85,8 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 			// Extract the directory name from the prefix
 			dirName := strings.TrimPrefix(attrs.Prefix, n.prefix)
 			dirName = strings.TrimSuffix(dirName, "/")
-			if dirName != "" && !seen[dirName] {
+			// Skip dot directories
+			if dirName != "" && !strings.HasPrefix(dirName, ".") && !seen[dirName] {
 				entries = append(entries, fuse.DirEntry{
 					Name: dirName,
 					Mode: fuse.S_IFDIR,
@@ -99,7 +100,8 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 		if attrs.Name != "" {
 			// Extract just the filename from the full object name
 			objectName := strings.TrimPrefix(attrs.Name, n.prefix)
-			if objectName != "" && !strings.Contains(objectName, "/") && !seen[objectName] {
+			// Skip dot files (except those already handled like .meta)
+			if objectName != "" && !strings.Contains(objectName, "/") && !strings.HasPrefix(objectName, ".") && !seen[objectName] {
 				entries = append(entries, fuse.DirEntry{
 					Name: objectName,
 					Mode: fuse.S_IFREG,
@@ -137,6 +139,12 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 		}, stable)
 		logGCS("Lookup", start, n.bucketName, n.prefix+name, "-> .meta dir")
 		return child, 0
+	}
+
+	// Return ENOENT for all other dot files (like .DS_Store, .config, etc.)
+	if strings.HasPrefix(name, ".") {
+		logGCS("Lookup", start, n.bucketName, n.prefix+name, "-> ENOENT (dot file)")
+		return nil, syscall.ENOENT
 	}
 
 	client, err := storagepkg.GetClient(ctx)
