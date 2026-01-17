@@ -2,6 +2,7 @@ package fuse
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"cloud.google.com/go/storage"
@@ -135,6 +136,9 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 		if end > len(b.buffer) {
 			end = len(b.buffer)
 		}
+		if gcsLogger != nil {
+			gcsLogger.Printf("ReadAheadBufferHit object=%s offset=%d requested=%d served_from_buffer=%d", b.objectName, off, len(dest), end-start)
+		}
 		return b.buffer[start:end], nil
 	}
 
@@ -144,19 +148,32 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 		readSize = ReadAheadBufferSize
 	}
 
+	if gcsLogger != nil {
+		gcsLogger.Printf("ReadAheadBufferMiss object=%s offset=%d fuse_requested=%d fetching_from_gcs=%d", b.objectName, off, len(dest), readSize)
+	}
+
 	reader, err := bucket.Object(b.objectName).NewRangeReader(ctx, off, int64(readSize))
 	if err != nil {
 		return nil, err
 	}
 	defer reader.Close()
 
-	// Read into buffer
+	// Read into buffer - use io.ReadFull to ensure we fetch the full read-ahead amount
 	b.buffer = b.buffer[:0]
 	buf := make([]byte, readSize)
-	n, _ := reader.Read(buf)
+	n, err := io.ReadFull(reader, buf)
+	// io.ReadFull returns io.ErrUnexpectedEOF if it reads some data but less than len(buf)
+	// This is expected at end of file, so we accept it as success
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
 	b.buffer = buf[:n]
 	b.offset = off
 	b.valid = true
+
+	if gcsLogger != nil {
+		gcsLogger.Printf("ReadAheadBufferFetched object=%s offset=%d fetched=%d buffered=%d", b.objectName, off, n, len(b.buffer))
+	}
 
 	// Return requested portion
 	end := len(dest)
