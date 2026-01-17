@@ -196,35 +196,47 @@ func (n *TableMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *f
 // Read returns the content of the virtual file
 func (n *TableMetaFileNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	start := time.Now()
-	// Get table metadata
-	info, err := bigquery.DescribeTable(ctx, n.projectID, n.datasetID, n.tableID)
+
+	// Get metadata cache
+	cache := GetMetadataCache()
+
+	// Use cache for table metadata
+	metadata, err := cache.GetTableMetadata(ctx, n.projectID, n.datasetID, n.tableID, func() ([]byte, error) {
+		// Generator function - called only on cache miss
+		info, err := bigquery.DescribeTable(ctx, n.projectID, n.datasetID, n.tableID)
+		if err != nil {
+			logGC("BQ:DescribeTable", start, n.datasetID, n.tableID, "ERROR", err)
+			return nil, err
+		}
+
+		var content string
+		if n.fileName == "schema.json" {
+			// Return just the schema in JSON format
+			content = formatSchemaAsJSON(info)
+		} else {
+			// Return full metadata
+			content = info.FormatDetailed(fmt.Sprintf("%s.%s.%s", n.projectID, n.datasetID, n.tableID))
+		}
+
+		return []byte(content), nil
+	})
+
 	if err != nil {
-		logGC("BQ:DescribeTable", start, n.datasetID, n.tableID, "ERROR", err)
 		return nil, MapGCPError(err)
 	}
 
-	var content string
-	if n.fileName == "schema.json" {
-		// Return just the schema in JSON format
-		content = formatSchemaAsJSON(info)
-	} else {
-		// Return full metadata
-		content = info.FormatDetailed(fmt.Sprintf("%s.%s.%s", n.projectID, n.datasetID, n.tableID))
-	}
-
 	// Handle offset and length
-	data := []byte(content)
-	if off >= int64(len(data)) {
+	if off >= int64(len(metadata)) {
 		return fuse.ReadResultData([]byte{}), 0
 	}
 
 	end := off + int64(len(dest))
-	if end > int64(len(data)) {
-		end = int64(len(data))
+	if end > int64(len(metadata)) {
+		end = int64(len(metadata))
 	}
 
 	logGC("BQ:ReadTableMetadata", start, n.datasetID, n.tableID, n.fileName, "offset", off, "bytes", end-off)
-	return fuse.ReadResultData(data[off:end]), 0
+	return fuse.ReadResultData(metadata[off:end]), 0
 }
 
 // formatSchemaAsJSON formats a BigQuery schema as JSON

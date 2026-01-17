@@ -61,6 +61,17 @@ func (c *MetadataCache) getCachePath(bucketName, objectName string, isBucket boo
 	return filepath.Join(c.cacheDir, fmt.Sprintf("object_%s_%s.json", bucketName, safeName))
 }
 
+// getBQCachePath returns the cache file path for BigQuery resources
+func (c *MetadataCache) getBQCachePath(projectID, datasetID, tableID string) string {
+	if tableID != "" {
+		return filepath.Join(c.cacheDir, fmt.Sprintf("bq_table_%s_%s_%s.json", projectID, datasetID, tableID))
+	}
+	if datasetID != "" {
+		return filepath.Join(c.cacheDir, fmt.Sprintf("bq_dataset_%s_%s.json", projectID, datasetID))
+	}
+	return filepath.Join(c.cacheDir, fmt.Sprintf("bq_project_%s.json", projectID))
+}
+
 // GetBucketMetadata gets bucket metadata from cache or generates it
 func (c *MetadataCache) GetBucketMetadata(ctx context.Context, bucketName string, generator func() ([]byte, error)) ([]byte, error) {
 	start := time.Now()
@@ -216,4 +227,87 @@ func (c *MetadataCache) InvalidateAll() {
 	// Remove all cache files
 	os.RemoveAll(c.cacheDir)
 	os.MkdirAll(c.cacheDir, 0755)
+}
+
+// GetTableMetadata gets BigQuery table metadata from cache or generates it
+func (c *MetadataCache) GetTableMetadata(ctx context.Context, projectID, datasetID, tableID string, generator func() ([]byte, error)) ([]byte, error) {
+	start := time.Now()
+	if !c.enabled {
+		return generator()
+	}
+
+	cachePath := c.getBQCachePath(projectID, datasetID, tableID)
+
+	// Try to read from cache
+	c.mu.RLock()
+	data, err := os.ReadFile(cachePath)
+	c.mu.RUnlock()
+
+	if err == nil {
+		var cached cachedMetadata
+		if json.Unmarshal(data, &cached) == nil {
+			// Check if cache is still valid
+			if time.Now().Before(cached.ExpiresAt) {
+				logGC("CacheHit", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
+				// Re-prettify the JSON data before returning
+				var metadata map[string]interface{}
+				if json.Unmarshal(cached.Data, &metadata) == nil {
+					if prettyData, err := json.MarshalIndent(metadata, "", "  "); err == nil {
+						return prettyData, nil
+					}
+				}
+				// Fallback to raw data if prettification fails
+				return cached.Data, nil
+			} else {
+				logGC("CacheExpired", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
+			}
+		}
+	}
+
+	// Cache miss or expired - generate new metadata
+	logGC("CacheMiss", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
+	metadata, err := generator()
+	if err != nil {
+		return nil, err
+	}
+
+	// Save to cache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cached := cachedMetadata{
+		Data:      metadata,
+		CachedAt:  time.Now(),
+		ExpiresAt: time.Now().Add(MetadataCacheTTL),
+	}
+
+	if cacheData, err := json.Marshal(cached); err == nil {
+		os.WriteFile(cachePath, cacheData, 0644)
+		logGC("CacheSave", start, "table", fmt.Sprintf("%s.%s.%s", projectID, datasetID, tableID), "type", "metadata")
+	}
+
+	return metadata, nil
+}
+
+// InvalidateDataset invalidates all cached metadata for a BigQuery dataset
+func (c *MetadataCache) InvalidateDataset(projectID, datasetID string) {
+	if !c.enabled {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Remove dataset metadata cache
+	datasetPath := c.getBQCachePath(projectID, datasetID, "")
+	os.Remove(datasetPath)
+
+	// Remove all table metadata for this dataset
+	pattern := filepath.Join(c.cacheDir, fmt.Sprintf("bq_table_%s_%s_*.json", projectID, datasetID))
+	matches, err := filepath.Glob(pattern)
+	if err == nil {
+		for _, match := range matches {
+			os.Remove(match)
+		}
+	}
 }
