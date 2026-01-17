@@ -2,11 +2,13 @@ package fuse
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"syscall"
 	"time"
 
+	cloud_bigquery "cloud.google.com/go/bigquery"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/thieso2/cio/internal/bigquery"
@@ -241,20 +243,63 @@ func (n *TableMetaFileNode) Read(ctx context.Context, fh fs.FileHandle, dest []b
 
 // formatSchemaAsJSON formats a BigQuery schema as JSON
 func formatSchemaAsJSON(info *bigquery.BQObjectInfo) string {
-	// Simple JSON representation
-	return fmt.Sprintf(`{
-  "table": "%s",
-  "type": "%s",
-  "size_bytes": %d,
-  "num_rows": %d,
-  "created": "%s",
-  "modified": "%s",
-  "location": "%s",
-  "description": "%s"
-}`, info.Path, info.Type, info.SizeBytes, info.NumRows,
-		info.Created.Format("2006-01-02T15:04:05Z"),
-		info.Modified.Format("2006-01-02T15:04:05Z"),
-		info.Location, info.Description)
+	// Convert schema to JSON-serializable format
+	type Field struct {
+		Name        string   `json:"name"`
+		Type        string   `json:"type"`
+		Mode        string   `json:"mode,omitempty"`
+		Description string   `json:"description,omitempty"`
+		Fields      []Field  `json:"fields,omitempty"` // For nested RECORD types
+	}
+
+	var convertField func(*cloud_bigquery.FieldSchema) Field
+	convertField = func(f *cloud_bigquery.FieldSchema) Field {
+		field := Field{
+			Name:        f.Name,
+			Type:        string(f.Type),
+			Description: f.Description,
+		}
+
+		// Set mode
+		if f.Required {
+			field.Mode = "REQUIRED"
+		} else if f.Repeated {
+			field.Mode = "REPEATED"
+		} else {
+			field.Mode = "NULLABLE"
+		}
+
+		// Convert nested fields for RECORD types
+		if len(f.Schema) > 0 {
+			field.Fields = make([]Field, len(f.Schema))
+			for i, nestedField := range f.Schema {
+				field.Fields[i] = convertField(nestedField)
+			}
+		}
+
+		return field
+	}
+
+	// Convert all fields
+	fields := make([]Field, len(info.Schema))
+	for i, f := range info.Schema {
+		fields[i] = convertField(f)
+	}
+
+	// Create schema object
+	schema := map[string]interface{}{
+		"table":       info.Path,
+		"description": info.Description,
+		"fields":      fields,
+	}
+
+	// Marshal to pretty JSON
+	jsonBytes, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+
+	return string(jsonBytes)
 }
 
 // BQMetaDirectoryNode represents the .meta/ directory in a dataset
