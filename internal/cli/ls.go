@@ -15,6 +15,7 @@ var (
 	lsHumanReadable bool
 	lsRecursive     bool
 	lsMaxResults    int
+	lsNoMap         bool
 )
 
 var lsCmd = &cobra.Command{
@@ -107,11 +108,16 @@ Examples (BigQuery):
 
 		// Print results
 		for _, info := range resources {
-			aliasPath := r.ReverseResolve(info.Path)
+			// Use full path if --no-map flag is set, otherwise use alias path
+			displayPath := info.Path
+			if !lsNoMap {
+				displayPath = r.ReverseResolve(info.Path)
+			}
+
 			if lsLongFormat {
-				fmt.Println(res.FormatLong(info, aliasPath))
+				fmt.Println(res.FormatLong(info, displayPath))
 			} else {
-				fmt.Println(res.FormatShort(info, aliasPath))
+				fmt.Println(res.FormatShort(info, displayPath))
 			}
 		}
 
@@ -125,6 +131,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsHumanReadable, "human-readable", false, "print sizes in human-readable format (e.g., 1.2 MB)")
 	lsCmd.Flags().BoolVarP(&lsRecursive, "recursive", "r", false, "list all objects recursively")
 	lsCmd.Flags().IntVar(&lsMaxResults, "max-results", 0, "maximum number of results (0 = no limit)")
+	lsCmd.Flags().BoolVarP(&lsNoMap, "no-map", "n", false, "show full paths without alias mapping")
 
 	// Add to root command
 	rootCmd.AddCommand(lsCmd)
