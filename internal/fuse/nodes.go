@@ -72,11 +72,17 @@ var _ fs.NodeLookuper = (*ServiceNode)(nil)
 
 // Readdir lists resources under the service
 // For storage service, lists all buckets
+// For bigquery service, lists all datasets
 // For other services, returns empty list
 func (n *ServiceNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	if n.serviceName == "storage" {
 		// Delegate to GCS bucket listing
 		return listGCSBuckets(ctx, n.projectID)
+	}
+
+	if n.serviceName == "bigquery" {
+		// Delegate to BigQuery dataset listing
+		return listBQDatasets(ctx, n.projectID)
 	}
 
 	// For other services, return empty
@@ -95,6 +101,7 @@ func (n *ServiceNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.At
 
 // Lookup finds a child node by name
 // For storage service, looks up bucket by name
+// For bigquery service, looks up dataset by name
 // For other services, returns ENOENT
 func (n *ServiceNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	if n.serviceName == "storage" {
@@ -105,6 +112,18 @@ func (n *ServiceNode) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 		child := n.NewInode(ctx, &BucketNode{
 			projectID:  n.projectID,
 			bucketName: name,
+		}, stable)
+		return child, 0
+	}
+
+	if n.serviceName == "bigquery" {
+		// Create a DatasetNode for the requested dataset
+		stable := fs.StableAttr{
+			Mode: fuse.S_IFDIR,
+		}
+		child := n.NewInode(ctx, &DatasetNode{
+			projectID: n.projectID,
+			datasetID: name,
 		}, stable)
 		return child, 0
 	}
