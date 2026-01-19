@@ -6,7 +6,7 @@ This document describes how to create a new release of `cio`.
 
 The project uses [GoReleaser](https://goreleaser.com/) for automated builds and releases. When you push a version tag, GitHub Actions automatically:
 
-1. Builds binaries for multiple platforms (Linux, macOS, Windows)
+1. Builds binaries for multiple platforms (Linux, macOS)
 2. Creates a GitHub release with changelog
 3. Uploads all binaries and checksums
 
@@ -14,7 +14,6 @@ The project uses [GoReleaser](https://goreleaser.com/) for automated builds and 
 
 - **Linux**: amd64, arm64
 - **macOS**: amd64 (Intel), arm64 (Apple Silicon)
-- **Windows**: amd64
 
 ## Creating a Release
 
