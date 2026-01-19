@@ -202,3 +202,128 @@ run = [
   "echo 'Starting godoc server at http://localhost:6060'",
   "godoc -http=:6060"
 ]
+
+# Release tasks
+[tasks.release]
+description = "Create and push a new release tag (usage: mise release -- v1.0.0)"
+run = '''
+#!/usr/bin/env bash
+set -e
+
+VERSION="${1:-}"
+if [ -z "$VERSION" ]; then
+  echo "Error: Version required"
+  echo "Usage: mise release -- v1.0.0"
+  exit 1
+fi
+
+# Validate version format
+if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+  echo "Error: Invalid version format. Expected format: v1.0.0 or v1.0.0-beta.1"
+  exit 1
+fi
+
+# Check for uncommitted changes
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Error: Working directory is not clean. Commit or stash your changes first."
+  git status --short
+  exit 1
+fi
+
+# Check if tag already exists
+if git rev-parse "$VERSION" >/dev/null 2>&1; then
+  echo "Error: Tag $VERSION already exists"
+  exit 1
+fi
+
+# Get current branch
+BRANCH=$(git branch --show-current)
+echo "Current branch: $BRANCH"
+
+# Run tests
+echo "Running tests..."
+go test ./... || { echo "Error: Tests failed"; exit 1; }
+
+# Show what will be tagged
+echo ""
+echo "Will create and push tag: $VERSION"
+echo "Latest commits:"
+git log --oneline -5
+echo ""
+
+# Confirm
+read -p "Create release $VERSION? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  echo "Release cancelled"
+  exit 1
+fi
+
+# Create and push tag
+echo "Creating tag $VERSION..."
+git tag -a "$VERSION" -m "Release $VERSION"
+
+echo "Pushing tag to origin..."
+git push origin "$VERSION"
+
+echo ""
+echo "✓ Release $VERSION created and pushed!"
+echo ""
+echo "GitHub Actions will now build and publish the release."
+echo "Monitor progress at: https://github.com/thieso2/cio/actions"
+echo "Release will be available at: https://github.com/thieso2/cio/releases/tag/$VERSION"
+'''
+
+[tasks.release-test]
+description = "Test the release process locally with GoReleaser (requires goreleaser)"
+run = [
+  "echo '=== Testing release process locally ==='",
+  "echo 'This will create binaries in dist/ directory without publishing'",
+  "echo ''",
+  "goreleaser release --snapshot --clean --skip=publish",
+  "echo ''",
+  "echo '=== Build artifacts ==='",
+  "ls -lh dist/"
+]
+
+[tasks.release-check]
+description = "Validate GoReleaser configuration"
+run = [
+  "echo '=== Checking GoReleaser configuration ==='",
+  "goreleaser check",
+  "echo ''",
+  "echo '✓ Configuration is valid'"
+]
+
+[tasks.release-install-goreleaser]
+description = "Install GoReleaser"
+run = '''
+#!/usr/bin/env bash
+if command -v goreleaser >/dev/null 2>&1; then
+  echo "GoReleaser is already installed: $(goreleaser --version)"
+else
+  echo "Installing GoReleaser..."
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    brew install goreleaser
+  else
+    echo "Please install GoReleaser manually: https://goreleaser.com/install/"
+    exit 1
+  fi
+  echo "✓ GoReleaser installed: $(goreleaser --version)"
+fi
+'''
+
+[tasks.release-changelog]
+description = "Show what would be in the next release changelog"
+run = '''
+#!/usr/bin/env bash
+LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+if [ -z "$LATEST_TAG" ]; then
+  echo "No previous tags found. Showing all commits:"
+  git log --oneline --graph --decorate
+else
+  echo "Changes since $LATEST_TAG:"
+  echo ""
+  git log "$LATEST_TAG"..HEAD --oneline --graph --decorate
+fi
+'''

@@ -18,48 +18,77 @@ The project uses [GoReleaser](https://goreleaser.com/) for automated builds and 
 
 ## Creating a Release
 
-### 1. Ensure Everything is Ready
+### Method 1: Using Mise (Recommended)
+
+The easiest way to create a release is using the mise task:
 
 ```bash
-# Make sure you're on the main/master branch (or your target branch)
-git checkout main
-git pull origin main
-
-# Run tests to ensure everything works
-mise test
-
-# Check that the build works
-mise build
+# Create and push a new release
+mise release -- v1.0.0
 ```
 
-### 2. Create and Push a Version Tag
+This task will:
+1. ✅ Validate the version format
+2. ✅ Check for uncommitted changes
+3. ✅ Run all tests
+4. ✅ Show what will be tagged
+5. ✅ Ask for confirmation
+6. ✅ Create and push the tag
 
 We follow [Semantic Versioning](https://semver.org/):
 - `v1.0.0` - Major version (breaking changes)
 - `v1.1.0` - Minor version (new features, backwards compatible)
 - `v1.0.1` - Patch version (bug fixes)
+- `v1.0.0-beta.1` - Pre-release versions
+
+### Method 2: Manual Release
+
+If you prefer to create the release manually:
 
 ```bash
-# Create a new tag (replace with your version)
-git tag -a v1.0.0 -m "Release v1.0.0"
+# 1. Ensure everything is ready
+git checkout main
+git pull origin main
+mise test
+mise build
 
-# Push the tag to trigger the release workflow
+# 2. Create and push a version tag
+git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
-### 3. Monitor the Release
+### 2. Monitor the Release
 
 1. Go to the [Actions tab](https://github.com/thieso2/cio/actions) in GitHub
 2. Watch the "Release" workflow
 3. Once complete, check the [Releases page](https://github.com/thieso2/cio/releases)
 
-### 4. Verify the Release
+### 3. Verify the Release
 
 The release should include:
 - Binaries for all supported platforms
 - SHA256 checksums (`checksums.txt`)
 - Automatically generated changelog
 - Source code archives
+
+## Useful Mise Tasks
+
+```bash
+# Preview changes since last release
+mise release-changelog
+
+# Test release process locally (creates binaries in dist/)
+mise release-test
+
+# Validate GoReleaser configuration
+mise release-check
+
+# Install GoReleaser (macOS only)
+mise release-install-goreleaser
+
+# View all release-related tasks
+mise tasks | grep release
+```
 
 ## Local Testing with GoReleaser
 
