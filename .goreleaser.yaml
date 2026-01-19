@@ -34,11 +34,6 @@ builds:
 
 archives:
   - id: cio
-    format: tar.gz
-    # Use zip for Windows
-    format_overrides:
-      - goos: windows
-        format: zip
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -50,7 +45,8 @@ archives:
     files:
       - README.md
       - LICENSE
-      - docs/*
+      - RELEASE.md
+      - FUSE.md
 
 checksum:
   name_template: 'checksums.txt'
