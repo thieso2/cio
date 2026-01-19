@@ -35,7 +35,7 @@ func (bi *BQObjectInfo) FormatShortWithAlias(aliasPath string) string {
 
 // FormatLong formats BigQuery object info in long format
 func (bi *BQObjectInfo) FormatLong() string {
-	created := bi.Created.Format(time.RFC3339)
+	created := formatUnixTime(bi.Created)
 
 	var size string
 	if bi.Type == "table" && bi.SizeBytes > 0 {
@@ -80,8 +80,8 @@ func (bi *BQObjectInfo) FormatDetailed(aliasPath string) string {
 	if bi.Description != "" {
 		output.WriteString(fmt.Sprintf("Description: %s\n", bi.Description))
 	}
-	output.WriteString(fmt.Sprintf("Created: %s\n", bi.Created.Format(time.RFC3339)))
-	output.WriteString(fmt.Sprintf("Modified: %s\n", bi.Modified.Format(time.RFC3339)))
+	output.WriteString(fmt.Sprintf("Created: %s\n", formatUnixTime(bi.Created)))
+	output.WriteString(fmt.Sprintf("Modified: %s\n", formatUnixTime(bi.Modified)))
 	output.WriteString(fmt.Sprintf("Location: %s\n", bi.Location))
 
 	if bi.SizeBytes > 0 {
@@ -160,6 +160,28 @@ func formatSize(bytes int64) string {
 
 	units := []string{"KB", "MB", "GB", "TB", "PB"}
 	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
+}
+
+// formatUnixTime formats a time in Unix ls style
+// Recent files (< 6 months): "19 Jan. 16:54"
+// Older files (>= 6 months): " 2 Jan.  2024"
+func formatUnixTime(t time.Time) string {
+	now := time.Now()
+	sixMonthsAgo := now.AddDate(0, -6, 0)
+
+	// Get month abbreviation with period
+	month := t.Format("Jan")
+	month = strings.TrimSuffix(month, ".") + "."
+
+	if t.After(sixMonthsAgo) {
+		// Recent file: show time
+		// Format: " 2 Jan. 16:54" or "19 Jan. 16:54"
+		return fmt.Sprintf("%2d %s %s", t.Day(), month, t.Format("15:04"))
+	}
+
+	// Old file: show year
+	// Format: " 2 Jan.  2024" or "19 Jan.  2024"
+	return fmt.Sprintf("%2d %s %5d", t.Day(), month, t.Year())
 }
 
 // ListDatasets lists all datasets in a project

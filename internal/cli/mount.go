@@ -12,12 +12,14 @@ import (
 )
 
 var (
-	mountDebug     bool
-	mountReadOnly  bool
-	mountOptions   string // Comma-separated mount options (e.g., "allow_other,default_permissions")
-	logGC          bool   // Log Google Cloud API calls with timing (GCS, BigQuery, etc.)
-	cleanCache     bool   // Clear metadata cache on startup
-	readAheadSizeMB int   // Read-ahead buffer size in MB (0 = use default 5MB)
+	mountDebug      bool
+	mountReadOnly   bool
+	mountOptions    string // Comma-separated mount options (e.g., "allow_other,default_permissions")
+	logGC           bool   // Log Google Cloud API calls with timing (GCS, BigQuery, etc.)
+	logCache        bool   // Log cache operations (CacheMiss, CacheSave, CacheShared) (requires --log-gc)
+	logCacheHits    bool   // Log cache hits in addition to API calls (requires --log-gc and --log-cache)
+	cleanCache      bool   // Clear metadata cache on startup
+	readAheadSizeMB int    // Read-ahead buffer size in MB (0 = use default 5MB)
 )
 
 var mountCmd = &cobra.Command{
@@ -86,6 +88,8 @@ To unmount:
 			ReadOnly:      mountReadOnly,
 			MountOpts:     mountOpts,
 			LogGC:         logGC,
+			LogCache:      logCache,
+			LogCacheHits:  logCacheHits,
 			CleanCache:    cleanCache,
 			ReadAheadSize: readAheadSizeMB * 1024 * 1024, // Convert MB to bytes
 		}
@@ -125,6 +129,8 @@ func init() {
 	mountCmd.Flags().BoolVar(&mountReadOnly, "read-only", false, "Mount filesystem in read-only mode")
 	mountCmd.Flags().StringVarP(&mountOptions, "options", "o", "", "Comma-separated FUSE mount options (e.g., allow_other,default_permissions)")
 	mountCmd.Flags().BoolVar(&logGC, "log-gc", false, "Log Google Cloud API calls with timing information (GCS, BigQuery, etc.)")
+	mountCmd.Flags().BoolVar(&logCache, "log-cache", false, "Log cache operations: CacheMiss, CacheSave, CacheShared (requires --log-gc)")
+	mountCmd.Flags().BoolVar(&logCacheHits, "log-cache-hits", false, "Log cache hits in addition to cache operations (requires --log-gc and --log-cache)")
 	mountCmd.Flags().BoolVar(&cleanCache, "clean-cache", false, "Clear metadata cache on startup")
 	mountCmd.Flags().IntVar(&readAheadSizeMB, "read-ahead-mb", 0, "Read-ahead buffer size in MB (default: 5)")
 	rootCmd.AddCommand(mountCmd)

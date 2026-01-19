@@ -218,10 +218,14 @@ func (n *BucketMetaFileNode) generateMetadata(ctx context.Context) ([]byte, erro
 		}
 
 		attrs, err := client.Bucket(n.bucketName).Attrs(ctx)
-		logGC("GetBucketAttrs", start, n.bucketName)
 		if err != nil {
+			logGC("GCS:GetBucketAttrs", start, n.bucketName, "ERROR", err)
 			return nil, err
 		}
+
+		// Log successful API call with details
+		logGC("GCS:GetBucketAttrs", start, n.bucketName,
+			"location", attrs.Location, "class", attrs.StorageClass)
 
 		metadata := map[string]interface{}{
 			"version":            "1.0",
@@ -311,6 +315,9 @@ func (n *ObjectMetaFileNode) generateMetadata(ctx context.Context) ([]byte, erro
 	cache := GetMetadataCache()
 
 	return cache.GetObjectMetadata(ctx, n.bucketName, n.objectName, func() ([]byte, error) {
+		// Check if this is a dot file and skip logging
+		isDot := strings.HasPrefix(n.objectName, ".") || strings.Contains(n.objectName, "/.")
+
 		start := time.Now()
 		client, err := storagepkg.GetClient(ctx)
 		if err != nil {
@@ -318,9 +325,17 @@ func (n *ObjectMetaFileNode) generateMetadata(ctx context.Context) ([]byte, erro
 		}
 
 		attrs, err := client.Bucket(n.bucketName).Object(n.objectName).Attrs(ctx)
-		logGC("GetObjectAttrs", start, n.bucketName, n.objectName)
 		if err != nil {
+			if !isDot {
+				logGC("GCS:GetObjectAttrs", start, n.bucketName, n.objectName, "ERROR", err)
+			}
 			return nil, err
+		}
+
+		// Log successful API call with details (skip dot files)
+		if !isDot {
+			logGC("GCS:GetObjectAttrs", start, n.bucketName, n.objectName,
+				"size", attrs.Size, "type", attrs.ContentType)
 		}
 
 		metadata := map[string]interface{}{

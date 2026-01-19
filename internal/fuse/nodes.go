@@ -104,6 +104,11 @@ func (n *ServiceNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.At
 // For bigquery service, looks up dataset by name
 // For other services, returns ENOENT
 func (n *ServiceNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// Ignore files starting with "." (like .DS_Store)
+	if len(name) > 0 && name[0] == '.' {
+		return nil, syscall.ENOENT
+	}
+
 	if n.serviceName == "storage" {
 		// Create a BucketNode for the requested bucket
 		stable := fs.StableAttr{

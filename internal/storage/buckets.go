@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/api/iterator"
 )
@@ -12,7 +13,7 @@ type BucketInfo struct {
 	Name         string
 	Location     string
 	StorageClass string
-	Created      string
+	Created      time.Time
 }
 
 // ListBuckets lists all buckets in a GCP project
@@ -38,7 +39,7 @@ func ListBuckets(ctx context.Context, projectID string) ([]*BucketInfo, error) {
 			Name:         bucketAttrs.Name,
 			Location:     bucketAttrs.Location,
 			StorageClass: bucketAttrs.StorageClass,
-			Created:      bucketAttrs.Created.Format("2006-01-02 15:04:05"),
+			Created:      bucketAttrs.Created,
 		})
 	}
 
@@ -52,8 +53,9 @@ func FormatBucketShort(bucket *BucketInfo) string {
 
 // FormatBucketLong formats bucket info in long format
 func FormatBucketLong(bucket *BucketInfo) string {
-	return fmt.Sprintf("%-20s %-15s %-20s gs://%s/",
-		bucket.Created,
+	timestamp := FormatUnixTime(bucket.Created)
+	return fmt.Sprintf("%-15s %-20s %s  gs://%s/",
+		timestamp,
 		bucket.Location,
 		bucket.StorageClass,
 		bucket.Name)

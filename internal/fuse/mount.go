@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -13,16 +14,84 @@ import (
 // gcLogger is the global logger for Google Cloud API calls (set by Mount)
 var gcLogger *log.Logger
 
+// logCache controls whether cache operations are logged (default: false)
+var logCache bool
+
+// logCacheHits controls whether cache hits are logged (default: false)
+var logCacheHits bool
+
 // EnableGCLogging enables Google Cloud API call logging (GCS, BigQuery, etc.)
 func EnableGCLogging() {
 	gcLogger = log.New(os.Stderr, "[GC] ", log.LstdFlags|log.Lmicroseconds)
 }
 
+// EnableCacheLogging enables logging of cache operations
+func EnableCacheLogging() {
+	logCache = true
+}
+
+// EnableCacheHitLogging enables logging of cache hits in addition to API calls
+func EnableCacheHitLogging() {
+	logCacheHits = true
+	logCache = true // Cache hits require cache logging to be enabled
+}
+
+// getOperationIcon returns an emoji icon for the operation type
+func getOperationIcon(operation string) string {
+	switch {
+	case strings.HasPrefix(operation, "BQ:"):
+		return "📊" // BigQuery API call
+	case strings.HasPrefix(operation, "GCS:"):
+		return "📦" // GCS API call
+	case operation == "Lookup":
+		return "🔍" // Lookup operation
+	case operation == "CacheHit":
+		return "⚡" // Cache hit (fast)
+	case operation == "CacheMiss":
+		return "❓" // Cache miss
+	case operation == "CacheSave":
+		return "💾" // Cache save
+	case operation == "CacheExpired":
+		return "⏰" // Cache expired
+	case operation == "CacheShared":
+		return "🔄" // Cache shared (deduplicated)
+	case operation == "BufferHit":
+		return "⚡" // Read-ahead buffer hit (fast, like cache hit)
+	case operation == "BufferMiss":
+		return "❓" // Read-ahead buffer miss (will fetch from GCS)
+	case operation == "BufferSave":
+		return "💾" // Read-ahead buffer save (data buffered)
+	default:
+		return "📡" // Generic operation
+	}
+}
+
+// isCacheOperation checks if an operation is cache-related (including read-ahead buffer)
+func isCacheOperation(operation string) bool {
+	return operation == "CacheHit" || operation == "CacheMiss" ||
+	       operation == "CacheSave" || operation == "CacheExpired" ||
+	       operation == "CacheShared" ||
+	       operation == "BufferHit" || operation == "BufferMiss" ||
+	       operation == "BufferSave"
+}
+
 // logGC logs a Google Cloud operation with timing if logging is enabled
 func logGC(operation string, start time.Time, args ...interface{}) {
 	if gcLogger != nil {
+		// Filter cache operations unless --log-cache is enabled
+		if isCacheOperation(operation) && !logCache {
+			return
+		}
+
+		// Skip cache/buffer hit/expired logging unless explicitly enabled (requires --log-cache)
+		if !logCacheHits && (operation == "CacheHit" || operation == "CacheExpired" ||
+		                      operation == "BufferHit") {
+			return
+		}
+
 		elapsed := time.Since(start)
-		gcLogger.Printf("%s (%.3fms) %v", operation, float64(elapsed.Microseconds())/1000.0, args)
+		icon := getOperationIcon(operation)
+		gcLogger.Printf("%s %s (%.3fms) %v", icon, operation, float64(elapsed.Microseconds())/1000.0, args)
 	}
 }
 
@@ -33,6 +102,8 @@ type MountOptions struct {
 	ReadOnly      bool
 	MountOpts     []string // Raw FUSE mount options (e.g., ["allow_other", "default_permissions"])
 	LogGC         bool     // Enable Google Cloud API call logging with timing (GCS, BigQuery, etc.)
+	LogCache      bool     // Enable logging of cache operations (requires LogGC=true)
+	LogCacheHits  bool     // Enable logging of cache hits (requires LogGC=true and LogCache=true)
 	CleanCache    bool     // Clear metadata cache on startup
 	ReadAheadSize int      // Read-ahead buffer size in bytes (0 = use default 5MB)
 }
@@ -53,6 +124,14 @@ func Mount(mountpoint string, opts MountOptions) (*Server, error) {
 	// Enable Google Cloud API logging if requested
 	if opts.LogGC {
 		EnableGCLogging()
+		// Enable cache logging if requested
+		if opts.LogCache {
+			EnableCacheLogging()
+		}
+		// Enable cache hit logging if requested (requires cache logging)
+		if opts.LogCacheHits {
+			EnableCacheHitLogging()
+		}
 	}
 
 	// Clean metadata cache if requested

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,8 @@ var (
 	lsMaxResults    int
 	lsNoMap         bool
 	lsRaw           bool
+	lsSortBySize    bool
+	lsSortByTime    bool
 )
 
 var lsCmd = &cobra.Command{
@@ -103,6 +106,9 @@ Examples (BigQuery):
 			return fmt.Errorf("failed to list resources: %w", err)
 		}
 
+		// Sort resources
+		sortResources(resources, lsSortBySize, lsSortByTime)
+
 		// Handle empty results
 		if len(resources) == 0 {
 			if verbose {
@@ -160,6 +166,37 @@ func extractRawPath(path string) string {
 	return path
 }
 
+// sortResources sorts resources based on the specified flags
+// Default: sort by name (path)
+// -S: sort by size (descending)
+// -t: sort by time (newest first)
+func sortResources(resources []*resource.ResourceInfo, bySize, byTime bool) {
+	if bySize {
+		// Sort by size, descending (largest first)
+		sort.Slice(resources, func(i, j int) bool {
+			if resources[i].Size != resources[j].Size {
+				return resources[i].Size > resources[j].Size
+			}
+			// Secondary sort by name
+			return resources[i].Path < resources[j].Path
+		})
+	} else if byTime {
+		// Sort by time, descending (newest first)
+		sort.Slice(resources, func(i, j int) bool {
+			if !resources[i].Modified.Equal(resources[j].Modified) {
+				return resources[i].Modified.After(resources[j].Modified)
+			}
+			// Secondary sort by name
+			return resources[i].Path < resources[j].Path
+		})
+	} else {
+		// Default: sort by name (path), ascending
+		sort.Slice(resources, func(i, j int) bool {
+			return resources[i].Path < resources[j].Path
+		})
+	}
+}
+
 func init() {
 	// Add flags
 	lsCmd.Flags().BoolVarP(&lsLongFormat, "long", "l", false, "use long listing format (timestamp, size, path)")
@@ -168,6 +205,8 @@ func init() {
 	lsCmd.Flags().IntVar(&lsMaxResults, "max-results", 0, "maximum number of results (0 = no limit)")
 	lsCmd.Flags().BoolVarP(&lsNoMap, "no-map", "n", false, "show full paths without alias mapping")
 	lsCmd.Flags().BoolVar(&lsRaw, "raw", false, "output only resource names, one per line (useful for scripting)")
+	lsCmd.Flags().BoolVarP(&lsSortBySize, "sort-size", "S", false, "sort by size (largest first)")
+	lsCmd.Flags().BoolVarP(&lsSortByTime, "sort-time", "t", false, "sort by modification time (newest first)")
 
 	// Add to root command
 	rootCmd.AddCommand(lsCmd)

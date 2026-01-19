@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
@@ -125,21 +126,21 @@ func NewReadAheadBuffer(bucketName, objectName string) *ReadAheadBuffer {
 
 // Read reads data, using the buffer if available or fetching from GCS
 func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle, off int64, dest []byte) ([]byte, error) {
+	start := time.Now()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Check if we can serve from buffer
 	if b.valid && off >= b.offset && off < b.offset+int64(len(b.buffer)) {
-		// Serve from buffer
-		start := int(off - b.offset)
-		end := start + len(dest)
-		if end > len(b.buffer) {
-			end = len(b.buffer)
+		// Serve from buffer (no API call)
+		bufStart := int(off - b.offset)
+		bufEnd := bufStart + len(dest)
+		if bufEnd > len(b.buffer) {
+			bufEnd = len(b.buffer)
 		}
-		if gcLogger != nil {
-			gcLogger.Printf("ReadAheadBufferHit object=%s offset=%d requested=%d served_from_buffer=%d", b.objectName, off, len(dest), end-start)
-		}
-		return b.buffer[start:end], nil
+		// Log buffer hit (cache operation)
+		logGC("BufferHit", start, "object", b.objectName, "offset", off, "requested", len(dest), "served", bufEnd-bufStart)
+		return b.buffer[bufStart:bufEnd], nil
 	}
 
 	// Buffer miss - fetch from GCS with read-ahead
@@ -148,12 +149,15 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 		readSize = ReadAheadBufferSize
 	}
 
-	if gcLogger != nil {
-		gcLogger.Printf("ReadAheadBufferMiss object=%s offset=%d fuse_requested=%d fetching_from_gcs=%d", b.objectName, off, len(dest), readSize)
-	}
+	// Log buffer miss (cache operation)
+	logGC("BufferMiss", start, "object", b.objectName, "offset", off, "requested", len(dest), "fetching", readSize)
 
+	// Actual GCS API call
+	apiStart := time.Now()
 	reader, err := bucket.Object(b.objectName).NewRangeReader(ctx, off, int64(readSize))
 	if err != nil {
+		logGC("GCS:ReadObject", apiStart, "bucket", b.bucketName, "object", b.objectName,
+			"offset", off, "size", readSize, "ERROR", err)
 		return nil, err
 	}
 	defer reader.Close()
@@ -165,15 +169,21 @@ func (b *ReadAheadBuffer) Read(ctx context.Context, bucket *storage.BucketHandle
 	// io.ReadFull returns io.ErrUnexpectedEOF if it reads some data but less than len(buf)
 	// This is expected at end of file, so we accept it as success
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		logGC("GCS:ReadObject", apiStart, "bucket", b.bucketName, "object", b.objectName,
+			"offset", off, "size", readSize, "ERROR", err)
 		return nil, err
 	}
+
+	// Log successful API call
+	logGC("GCS:ReadObject", apiStart, "bucket", b.bucketName, "object", b.objectName,
+		"offset", off, "requested", readSize, "read", n)
+
 	b.buffer = buf[:n]
 	b.offset = off
 	b.valid = true
 
-	if gcLogger != nil {
-		gcLogger.Printf("ReadAheadBufferFetched object=%s offset=%d fetched=%d buffered=%d", b.objectName, off, n, len(b.buffer))
-	}
+	// Log buffer save (cache operation)
+	logGC("BufferSave", start, "object", b.objectName, "offset", off, "buffered", len(b.buffer))
 
 	// Return requested portion
 	end := len(dest)

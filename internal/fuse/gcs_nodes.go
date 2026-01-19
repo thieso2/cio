@@ -19,11 +19,12 @@ import (
 func listGCSBuckets(ctx context.Context, projectID string) (fs.DirStream, syscall.Errno) {
 	start := time.Now()
 	buckets, err := storagepkg.ListBuckets(ctx, projectID)
-	logGC("ListBuckets", start, projectID, len(buckets), "buckets")
-
 	if err != nil {
+		logGC("GCS:ListBuckets", start, "project", projectID, "ERROR", err)
 		return nil, MapGCPError(err)
 	}
+
+	logGC("GCS:ListBuckets", start, "project", projectID, "count", len(buckets))
 
 	entries := make([]fuse.DirEntry, 0, len(buckets))
 	for _, bucket := range buckets {
@@ -119,7 +120,7 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 		}
 	}
 
-	logGC("ListObjects", start, n.bucketName, n.prefix, len(entries)-1, "objects") // -1 for .meta dir
+	logGC("GCS:ListObjects", start, "bucket", n.bucketName, "prefix", n.prefix, "count", len(entries)-1) // -1 for .meta dir
 	return fs.NewListDirStream(entries), 0
 }
 
@@ -159,13 +160,13 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 			bucketName: n.bucketName,
 			prefix:     n.prefix,
 		}, stable)
-		logGC("Lookup", start, n.bucketName, n.prefix+name, "-> .meta dir")
+		logGC("Lookup", start, "bucket", n.bucketName, "path", n.prefix+name, "type", "meta-dir")
 		return child, 0
 	}
 
 	// Return ENOENT for all other dot files (like .DS_Store, .config, etc.)
+	// Suppress logging for dot files to reduce noise
 	if strings.HasPrefix(name, ".") {
-		logGC("Lookup", start, n.bucketName, n.prefix+name, "-> ENOENT (dot file)")
 		return nil, syscall.ENOENT
 	}
 
@@ -180,7 +181,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	attrs, err := bucket.Object(objectName).Attrs(ctx)
 	if err == nil {
 		// It's a file
-		logGC("Lookup", start, n.bucketName, objectName, "-> object")
+		logGC("Lookup", start, "bucket", n.bucketName, "path", objectName, "type", "object", "size", attrs.Size)
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
@@ -208,7 +209,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	_, err = it.Next()
 	if err != iterator.Done {
 		// It's a directory (has contents)
-		logGC("Lookup", start, n.bucketName, prefixPath, "-> prefix")
+		logGC("Lookup", start, "bucket", n.bucketName, "path", prefixPath, "type", "prefix")
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFDIR,
 		}
@@ -220,7 +221,7 @@ func (n *BucketNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 		return child, 0
 	}
 
-	logGC("Lookup", start, n.bucketName, n.prefix+name, "-> ENOENT")
+	logGC("Lookup", start, "bucket", n.bucketName, "path", n.prefix+name, "result", "ENOENT")
 	return nil, syscall.ENOENT
 }
 
@@ -270,7 +271,6 @@ func (n *ObjectNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 // Read reads data from the object with read-ahead buffering
 func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	start := time.Now()
 	client, err := storagepkg.GetClient(ctx)
 	if err != nil {
 		return nil, MapGCPError(err)
@@ -284,13 +284,11 @@ func (n *ObjectNode) Read(ctx context.Context, f fs.FileHandle, dest []byte, off
 	buffer := n.readAhead
 	n.readAheadMu.Unlock()
 
-	// Try to read from buffer with read-ahead
+	// Read from buffer with read-ahead (logging happens inside buffer.Read)
 	data, err := buffer.Read(ctx, client.Bucket(n.bucketName), off, dest)
 	if err != nil {
-		logGC("ReadObject", start, n.bucketName, n.objectName, "offset", off, "requested", len(dest), "ERROR", err)
 		return nil, MapGCPError(err)
 	}
 
-	logGC("ReadObject", start, n.bucketName, n.objectName, "offset", off, "requested", len(dest), "read", len(data), "bytes")
 	return fuse.ReadResultData(data), 0
 }
