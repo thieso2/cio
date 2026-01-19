@@ -1,13 +1,13 @@
 # cio - Cloud IO
 
-A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gcloud storage` and `bq` commands with short aliases. Also provides a FUSE filesystem for browsing Google Cloud resources.
+A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gcloud storage` and `bq` commands with short aliases. Also provides an **experimental** FUSE filesystem for browsing Google Cloud resources (⚠️ alpha quality, AI-generated).
 
 ## Features
 
 - **Alias Mappings**: Map short aliases to full GCS bucket paths and BigQuery datasets
 - **GCS Operations**: List, copy, remove files with familiar Unix-like commands
 - **BigQuery Support**: List datasets, tables, view schemas, and manage BigQuery resources
-- **FUSE Filesystem**: Mount GCS buckets and BigQuery datasets as local filesystems
+- **🧪 FUSE Filesystem** ⚠️ **EXPERIMENTAL & 100% AI-GENERATED**: Mount GCS buckets and BigQuery datasets as local filesystems (alpha quality, use with caution)
 - **Wildcard Support**: Use `*.log`, `events_*` patterns for bulk operations
 - **Fast**: Built in Go with metadata caching for speed and efficiency
 - **Simple Configuration**: YAML-based configuration with environment variable support
@@ -139,6 +139,207 @@ cio rm ':am/logs/*.tmp'
 # Force remove without confirmation
 cio rm -f :am/old-data/
 ```
+
+## 🧪 EXPERIMENTAL: FUSE Filesystem
+
+> **⚠️ WARNING: EXPERIMENTAL FEATURE**
+>
+> The FUSE filesystem functionality is **HIGHLY EXPERIMENTAL** and should be considered **ALPHA QUALITY** at best.
+>
+> **🤖 THIS CODE IS 100% AI-GENERATED** and has not been extensively tested in production environments.
+>
+> - **Use at your own risk** - may contain bugs, memory leaks, or unexpected behavior
+> - **Not recommended for production use**
+> - **Data loss is possible** - always have backups
+> - **Performance may vary** - caching behavior is experimental
+> - **API may change** without notice in future versions
+>
+> If you encounter issues, please report them on GitHub, but understand that support is limited.
+
+The FUSE filesystem allows you to mount Google Cloud Storage buckets and BigQuery datasets as local filesystems, enabling you to browse and interact with cloud resources using standard filesystem tools (`ls`, `cat`, `grep`, etc.).
+
+### Prerequisites
+
+**macOS:**
+```bash
+# Install macFUSE
+brew install --cask macfuse
+```
+
+**Linux:**
+```bash
+# Install FUSE3
+sudo apt-get install fuse3  # Debian/Ubuntu
+sudo yum install fuse3      # RHEL/CentOS
+```
+
+### Basic Usage
+
+```bash
+# Mount all configured aliases to a directory
+cio mount ~/gcs
+
+# Mount with verbose logging
+cio mount --verbose ~/gcs
+
+# Mount with GCS API call logging
+cio mount --log-gc ~/gcs
+
+# Unmount (macOS)
+umount ~/gcs
+
+# Unmount (Linux)
+fusermount -u ~/gcs
+```
+
+### Filesystem Structure
+
+Once mounted, you'll see a directory for each configured alias:
+
+```
+~/gcs/
+├── am/              # :am alias → gs://bucket-name/
+│   ├── .meta/       # Metadata directory
+│   │   ├── bucket_metadata.json
+│   │   └── _cache/  # Cached metadata
+│   ├── 2024/
+│   │   └── logs/
+│   └── data.csv
+└── mydata/          # :mydata alias → bq://project.dataset
+    ├── .meta/       # Metadata directory
+    │   └── dataset_metadata.json
+    ├── table1/
+    │   ├── schema.json
+    │   └── metadata.json
+    └── table2/
+        ├── schema.json
+        └── metadata.json
+```
+
+### Features
+
+**GCS Support:**
+- ✅ Read-only access to GCS objects
+- ✅ List directories and files
+- ✅ Read file contents
+- ✅ Metadata files (`.meta/bucket_metadata.json`)
+- ✅ Async read-ahead buffering for better performance
+- ✅ Configurable metadata caching (default: 30 minutes)
+
+**BigQuery Support:**
+- ✅ Browse datasets and tables as directories
+- ✅ View table schemas (`schema.json`)
+- ✅ View table metadata (`metadata.json`)
+- ✅ Metadata caching for performance
+
+### Metadata Files
+
+Special `.meta/` directories contain metadata about the resources:
+
+**GCS Buckets:**
+```bash
+cat ~/gcs/am/.meta/bucket_metadata.json
+```
+
+**BigQuery Tables:**
+```bash
+cat ~/gcs/mydata/table1/schema.json
+cat ~/gcs/mydata/table1/metadata.json
+```
+
+### Advanced Options
+
+```bash
+# Clear metadata cache on mount
+cio mount --clean-cache ~/gcs
+
+# Enable detailed GCS/BigQuery API logging
+cio mount --log-gc ~/gcs
+
+# Combine options
+cio mount --verbose --log-gc --clean-cache ~/gcs
+```
+
+### Performance Considerations
+
+- **Metadata caching**: Lists of objects/tables are cached for 30 minutes
+- **Read-ahead buffering**: GCS file reads use async prefetching
+- **Lazy loading**: Resources are only fetched when accessed
+- **Cache location**: `~/.cache/cio/metadata/`
+
+### Use Cases
+
+```bash
+# Browse GCS buckets with standard tools
+ls -lh ~/gcs/am/2024/
+find ~/gcs/am -name "*.log"
+grep "error" ~/gcs/am/logs/app.log
+
+# Explore BigQuery schemas
+cat ~/gcs/mydata/events/schema.json | jq '.fields[]'
+
+# Copy files from GCS
+cp ~/gcs/am/2024/data.csv ~/local/
+
+# Process GCS files with standard tools
+wc -l ~/gcs/am/logs/*.log
+tail -f ~/gcs/am/logs/latest.log
+```
+
+### Known Limitations
+
+- **Read-only**: Write operations are not supported
+- **Performance**: Network latency affects filesystem operations
+- **Caching**: Stale data possible with aggressive caching
+- **Large files**: May be slow without optimization
+- **Wildcards**: Some shell wildcards may not work as expected
+- **Symbolic links**: Not supported
+- **File permissions**: All files appear as read-only
+- **Timestamps**: May not reflect actual cloud timestamps accurately
+
+### Troubleshooting
+
+**Mount fails:**
+```bash
+# Check if macFUSE/FUSE3 is installed
+which macfuse  # macOS
+which fusermount3  # Linux
+
+# Check if mount point exists and is empty
+ls -la ~/gcs
+
+# Try with verbose logging
+cio mount --verbose ~/gcs
+```
+
+**Filesystem appears empty:**
+```bash
+# Check your mappings
+cio map list
+
+# Verify GCP authentication
+gcloud auth application-default print-access-token
+```
+
+**Performance issues:**
+```bash
+# Clear metadata cache
+rm -rf ~/.cache/cio/metadata/
+
+# Mount with cache cleaning
+cio mount --clean-cache ~/gcs
+```
+
+**Unmount issues:**
+```bash
+# Force unmount (macOS)
+sudo umount -f ~/gcs
+
+# Force unmount (Linux)
+sudo fusermount -uz ~/gcs
+```
+
+For more details, see [FUSE.md](FUSE.md).
 
 ## Configuration
 
@@ -419,7 +620,7 @@ cio/
 
 ## Roadmap
 
-### ✅ Phase 1-5: Completed
+### ✅ Phase 1-5: Completed (Stable)
 - CLI foundation with Cobra
 - Configuration management (YAML with env var expansion)
 - Alias mapping system for GCS and BigQuery
@@ -428,8 +629,15 @@ cio/
 - `cp` command (local ↔ GCS, recursive, wildcards)
 - `rm` command (GCS and BigQuery, recursive, wildcards, confirmations)
 - `info` command (detailed BigQuery table schemas)
-- FUSE filesystem for GCS and BigQuery
 - Metadata caching for performance
+
+### 🧪 Experimental (Alpha Quality)
+- **FUSE filesystem for GCS and BigQuery** ⚠️ **100% AI-GENERATED CODE**
+  - Read-only access to GCS objects and BigQuery metadata
+  - Mount cloud resources as local directories
+  - Metadata caching and async read-ahead
+  - Known issues: performance, caching edge cases, stability
+  - **Not production-ready** - use at your own risk
 
 ### 🚧 Phase 6: Future Enhancements
 - BigQuery data operations (query, export, import)
@@ -437,7 +645,7 @@ cio/
 - `cat` command for displaying file contents
 - `du` command for disk usage statistics
 - Web server for file browsing
-- Enhanced FUSE features (write support)
+- Enhanced FUSE features (write support, better performance)
 - Cloud SQL support
 
 ## Contributing
@@ -452,3 +660,5 @@ MIT License - see LICENSE file for details
 
 - Built with [Cobra](https://github.com/spf13/cobra) for CLI framework
 - Uses [Google Cloud Storage Go SDK](https://cloud.google.com/go/docs/reference/cloud.google.com/go/storage/latest)
+- Uses [Google Cloud BigQuery Go SDK](https://cloud.google.com/go/docs/reference/cloud.google.com/go/bigquery/latest)
+- FUSE filesystem powered by [go-fuse](https://github.com/hanwen/go-fuse) ⚠️ **Experimental implementation is 100% AI-generated**
