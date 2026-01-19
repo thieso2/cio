@@ -17,24 +17,52 @@ var (
 
 	// Global config instance
 	cfg *config.Config
+
+	// Version information
+	versionInfo = VersionInfo{
+		Version: "dev",
+		Commit:  "none",
+		Date:    "unknown",
+		BuiltBy: "unknown",
+	}
 )
+
+// VersionInfo holds version information
+type VersionInfo struct {
+	Version string
+	Commit  string
+	Date    string
+	BuiltBy string
+}
+
+// SetVersionInfo sets the version information
+func SetVersionInfo(version, commit, date, builtBy string) {
+	versionInfo.Version = version
+	versionInfo.Commit = commit
+	versionInfo.Date = date
+	versionInfo.BuiltBy = builtBy
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "cio",
-	Short: "Cloud IO - A fast CLI for Google Cloud Storage",
-	Long: `cio (Cloud IO) is a CLI tool that replaces common gcloud storage commands
-with short aliases and provides a built-in webserver for browsing and managing
-GCS buckets.
+	Use:     "cio",
+	Short:   "Cloud IO - A fast CLI for Google Cloud Storage and BigQuery",
+	Version: versionInfo.Version,
+	Long: `cio (Cloud IO) is a CLI tool that replaces common gcloud storage and bq commands
+with short aliases and provides a FUSE filesystem for browsing Google Cloud resources.
 
 Aliases are prefixed with : to distinguish them from regular paths.
 
 Examples:
   # Create a mapping
   cio map am gs://io-spooler-onprem-archived-metrics/
+  cio map mydata bq://project-id.dataset
 
   # List bucket contents
   cio ls :am
+
+  # List BigQuery tables
+  cio ls :mydata
 
   # List with details
   cio ls -l :am/2024/

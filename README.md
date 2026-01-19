@@ -1,16 +1,44 @@
 # cio - Cloud IO
 
-A fast CLI tool for Google Cloud Storage that replaces common `gcloud storage` commands with short aliases.
+A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gcloud storage` and `bq` commands with short aliases. Also provides a FUSE filesystem for browsing Google Cloud resources.
 
 ## Features
 
-- **Alias Mappings**: Map short aliases to full GCS bucket paths
-- **Familiar Commands**: Use short commands like `ls` instead of lengthy `gcloud storage` commands
-- **Fast**: Built in Go for speed and efficiency
+- **Alias Mappings**: Map short aliases to full GCS bucket paths and BigQuery datasets
+- **GCS Operations**: List, copy, remove files with familiar Unix-like commands
+- **BigQuery Support**: List datasets, tables, view schemas, and manage BigQuery resources
+- **FUSE Filesystem**: Mount GCS buckets and BigQuery datasets as local filesystems
+- **Wildcard Support**: Use `*.log`, `events_*` patterns for bulk operations
+- **Fast**: Built in Go with metadata caching for speed and efficiency
 - **Simple Configuration**: YAML-based configuration with environment variable support
 - **ADC Authentication**: Uses Google Application Default Credentials
 
 ## Installation
+
+### Download Pre-built Binaries
+
+Download the latest release for your platform from the [Releases page](https://github.com/thieso2/cio/releases).
+
+**Linux (amd64):**
+```bash
+wget https://github.com/thieso2/cio/releases/download/v1.0.0/cio_1.0.0_Linux_x86_64.tar.gz
+tar -xzf cio_1.0.0_Linux_x86_64.tar.gz
+sudo mv cio /usr/local/bin/
+```
+
+**macOS (Apple Silicon):**
+```bash
+wget https://github.com/thieso2/cio/releases/download/v1.0.0/cio_1.0.0_Darwin_arm64.tar.gz
+tar -xzf cio_1.0.0_Darwin_arm64.tar.gz
+sudo mv cio /usr/local/bin/
+```
+
+**macOS (Intel):**
+```bash
+wget https://github.com/thieso2/cio/releases/download/v1.0.0/cio_1.0.0_Darwin_x86_64.tar.gz
+tar -xzf cio_1.0.0_Darwin_x86_64.tar.gz
+sudo mv cio /usr/local/bin/
+```
 
 ### Using Go Install
 
@@ -23,44 +51,93 @@ go install github.com/thieso2/cio/cmd/cio@latest
 ```bash
 git clone https://github.com/thieso2/cio.git
 cd cio
-make install
-```
-
-### Build Locally
-
-```bash
-make build
-# Binary will be created as ./cio
+mise build   # or: make build
+mise install # or: make install
 ```
 
 ## Quick Start
 
-### 1. Authenticate with GCP
+### 1. Check Version
+
+```bash
+cio version
+```
+
+### 2. Authenticate with GCP
 
 ```bash
 gcloud auth application-default login
+# or: mise auth-setup
 ```
 
-### 2. Create Your First Mapping
+### 3. Create Your First Mappings
 
 ```bash
+# GCS bucket mapping
 cio map am gs://io-spooler-onprem-archived-metrics/
+
+# BigQuery dataset mapping
+cio map mydata bq://my-project-id.my-dataset
 ```
 
-### 3. List Bucket Contents
+### 4. List Resources
 
+**Google Cloud Storage:**
 ```bash
 # Short format
-cio ls am
+cio ls :am
 
 # Long format with details
-cio ls -l am
+cio ls -l :am
+
+# Sort by size (largest first)
+cio ls -lS :am
+
+# Sort by time (newest first)
+cio ls -lt :am
 
 # Long format with human-readable sizes
-cio ls -l --human-readable am
+cio ls -l --human-readable :am
 
 # Recursive listing
-cio ls -lr --human-readable am/2024/
+cio ls -lr --human-readable :am/2024/
+
+# Wildcard patterns
+cio ls ':am/logs/*.log'
+```
+
+**BigQuery:**
+```bash
+# List tables
+cio ls :mydata
+
+# List with details (size, row counts)
+cio ls -l :mydata
+
+# Show table schema
+cio info :mydata.events
+
+# List with wildcards
+cio ls ':mydata.events_*'
+```
+
+### 5. Copy and Remove Files
+
+```bash
+# Copy to GCS
+cio cp file.txt :am/2024/
+
+# Copy from GCS
+cio cp :am/2024/data.csv ./
+
+# Remove with confirmation
+cio rm :am/temp/old-file.txt
+
+# Remove with wildcards (shows preview first)
+cio rm ':am/logs/*.tmp'
+
+# Force remove without confirmation
+cio rm -f :am/old-data/
 ```
 
 ## Configuration
@@ -342,24 +419,26 @@ cio/
 
 ## Roadmap
 
-### ✅ Phase 1-3: Completed
+### ✅ Phase 1-5: Completed
 - CLI foundation with Cobra
-- Configuration management (YAML)
-- Alias mapping system
-- `ls` command with formatting options
+- Configuration management (YAML with env var expansion)
+- Alias mapping system for GCS and BigQuery
+- `ls` command with formatting options and sorting (`-S`, `-t`)
+- BigQuery support (list datasets/tables, show schemas, wildcards)
+- `cp` command (local ↔ GCS, recursive, wildcards)
+- `rm` command (GCS and BigQuery, recursive, wildcards, confirmations)
+- `info` command (detailed BigQuery table schemas)
+- FUSE filesystem for GCS and BigQuery
+- Metadata caching for performance
 
-### 🚧 Phase 4: Web Server (Future)
-- File browser UI
-- Mapping management interface
-- Dashboard with statistics
-- Upload/download through browser
-
-### 🚧 Phase 5: Additional Commands (Future)
-- `cp` - Copy files
-- `mv` - Move files
-- `rm` - Remove files
-- `cat` - Display file contents
-- `du` - Disk usage statistics
+### 🚧 Phase 6: Future Enhancements
+- BigQuery data operations (query, export, import)
+- `mv` command for moving files
+- `cat` command for displaying file contents
+- `du` command for disk usage statistics
+- Web server for file browsing
+- Enhanced FUSE features (write support)
+- Cloud SQL support
 
 ## Contributing
 
