@@ -31,6 +31,7 @@ import (
 
 	"github.com/thieso2/cio/bigquery"
 	"github.com/thieso2/cio/config"
+	"github.com/thieso2/cio/iam"
 	"github.com/thieso2/cio/resolver"
 	"github.com/thieso2/cio/storage"
 )
@@ -115,6 +116,14 @@ func (c *Client) BigQuery() *BigQueryClient {
 	}
 }
 
+// IAM returns an IAM client for IAM operations.
+func (c *Client) IAM() *IAMClient {
+	return &IAMClient{
+		config:   c.config,
+		resolver: c.resolver,
+	}
+}
+
 // Close releases any resources held by the client.
 func (c *Client) Close() error {
 	// Close storage client if initialized
@@ -125,6 +134,11 @@ func (c *Client) Close() error {
 	// Close BigQuery client if initialized
 	if err := bigquery.Close(); err != nil {
 		return fmt.Errorf("failed to close BigQuery client: %w", err)
+	}
+
+	// Close IAM client if initialized
+	if err := iam.Close(); err != nil {
+		return fmt.Errorf("failed to close IAM client: %w", err)
 	}
 
 	return nil
@@ -259,4 +273,26 @@ func (b *BigQueryClient) RemoveTable(ctx context.Context, projectID, datasetID, 
 		projectID = b.config.Defaults.ProjectID
 	}
 	return bigquery.RemoveTable(ctx, projectID, datasetID, tableID)
+}
+
+// IAMClient provides methods for interacting with Google Cloud IAM.
+type IAMClient struct {
+	config   *config.Config
+	resolver *resolver.Resolver
+}
+
+// ListServiceAccounts lists all service accounts in a project.
+func (i *IAMClient) ListServiceAccounts(ctx context.Context, projectID string) ([]*iam.ServiceAccountInfo, error) {
+	if projectID == "" {
+		projectID = i.config.Defaults.ProjectID
+	}
+	return iam.ListServiceAccounts(ctx, projectID)
+}
+
+// GetServiceAccount retrieves details about a specific service account.
+func (i *IAMClient) GetServiceAccount(ctx context.Context, projectID, accountEmail string) (*iam.ServiceAccountInfo, error) {
+	if projectID == "" {
+		projectID = i.config.Defaults.ProjectID
+	}
+	return iam.GetServiceAccount(ctx, projectID, accountEmail)
 }

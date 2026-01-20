@@ -5,28 +5,31 @@ import (
 	"time"
 )
 
-// Type represents the type of resource (GCS or BigQuery)
+// Type represents the type of resource (GCS, BigQuery, or IAM)
 type Type string
 
 const (
 	TypeGCS      Type = "gcs"
 	TypeBigQuery Type = "bq"
+	TypeIAM      Type = "iam"
 )
 
 // ResourceInfo holds unified information about a resource (object, table, dataset, etc.)
 type ResourceInfo struct {
-	Path        string    // Full path (gs://... or bq://...)
+	Path        string    // Full path (gs://... or bq://... or iam://...)
 	Name        string    // Just the name component
-	Type        string    // "file", "directory", "table", "dataset"
+	Type        string    // "file", "directory", "table", "dataset", "service-account"
 	Size        int64     // Size in bytes
 	Rows        int64     // Number of rows (BigQuery only)
 	Created     time.Time // Creation time
 	Modified    time.Time // Last modified time
 	Description string    // Description (if available)
 	Location    string    // Location/region
+	IsDir       bool      // Is this a directory?
 
-	// For detailed info (BigQuery schema, etc.)
-	Details interface{} // Type-specific details
+	// For detailed info (BigQuery schema, IAM account info, etc.)
+	Details  interface{} // Type-specific details
+	Metadata interface{} // Type-specific metadata for formatting
 }
 
 // ListOptions contains options for listing resources

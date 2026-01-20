@@ -28,6 +28,10 @@ func (f *Factory) Create(path string) (Resource, error) {
 		return CreateGCSResource(f.formatter), nil
 	}
 
+	if resolver.IsIAMPath(path) {
+		return CreateIAMResource(f.formatter), nil
+	}
+
 	return nil, fmt.Errorf("unknown resource type for path: %s", path)
 }
 
@@ -38,6 +42,8 @@ func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
 		return CreateGCSResource(f.formatter), nil
 	case TypeBigQuery:
 		return CreateBigQueryResource(f.formatter), nil
+	case TypeIAM:
+		return CreateIAMResource(f.formatter), nil
 	default:
 		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
 	}

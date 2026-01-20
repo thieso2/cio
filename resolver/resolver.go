@@ -28,8 +28,8 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		return "", fmt.Errorf("alias path cannot be empty")
 	}
 
-	// If already a gs:// or bq:// path, return as-is
-	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") {
+	// If already a gs://, bq://, or iam:// path, return as-is
+	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") {
 		return aliasPath, nil
 	}
 
@@ -213,6 +213,11 @@ func (r *Resolver) ReverseResolve(fullPath string) string {
 // IsBQPath checks if a string is a BigQuery path
 func IsBQPath(path string) bool {
 	return strings.HasPrefix(path, "bq://")
+}
+
+// IsIAMPath checks if a string is an IAM path
+func IsIAMPath(path string) bool {
+	return strings.HasPrefix(path, "iam://")
 }
 
 // GetAliasForInput extracts the alias from user input if one was used
