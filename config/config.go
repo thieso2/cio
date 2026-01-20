@@ -21,6 +21,7 @@ type Config struct {
 	Mappings map[string]string `yaml:"mappings"`
 	Defaults Defaults          `yaml:"defaults"`
 	Server   ServerConfig      `yaml:"server"`
+	Download DownloadConfig    `yaml:"download"`
 	filePath string            // Store the path where config was loaded from
 }
 
@@ -49,6 +50,9 @@ func Load(configPath string) (*Config, error) {
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	// Normalize config - apply defaults for missing values
+	config.normalize()
 
 	// Expand environment variables in mappings and defaults
 	config.expandEnvVars()
@@ -124,7 +128,40 @@ func getDefaultConfig(filePath string) *Config {
 			Host:      DefaultServerHost,
 			AutoStart: false,
 		},
+		Download: DownloadConfig{
+			ParallelThreshold: DefaultParallelThreshold,
+			ChunkSize:         DefaultChunkSize,
+			MaxChunks:         DefaultMaxChunks,
+		},
 		filePath: filePath,
+	}
+}
+
+// normalize applies default values for any missing configuration
+func (c *Config) normalize() {
+	// Apply download defaults if missing
+	if c.Download.ParallelThreshold == 0 {
+		c.Download.ParallelThreshold = DefaultParallelThreshold
+	}
+	if c.Download.ChunkSize == 0 {
+		c.Download.ChunkSize = DefaultChunkSize
+	}
+	if c.Download.MaxChunks == 0 {
+		c.Download.MaxChunks = DefaultMaxChunks
+	}
+
+	// Validate and clamp download values
+	if c.Download.ChunkSize < MinChunkSize {
+		c.Download.ChunkSize = MinChunkSize
+	}
+	if c.Download.ChunkSize > MaxChunkSize {
+		c.Download.ChunkSize = MaxChunkSize
+	}
+	if c.Download.MaxChunks < MinMaxChunks {
+		c.Download.MaxChunks = MinMaxChunks
+	}
+	if c.Download.MaxChunks > MaxMaxChunks {
+		c.Download.MaxChunks = MaxMaxChunks
 	}
 }
 

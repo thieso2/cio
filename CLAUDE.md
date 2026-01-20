@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
 - Singleton client pattern for performance (GCS, BigQuery, and IAM)
-- Bidirectional file transfer (local ↔ GCS)
+- Bidirectional file transfer (local ↔ GCS) with parallel chunked downloads
 - FUSE filesystem support for GCS, BigQuery, and IAM (experimental)
 
 ## Development Commands
@@ -65,6 +65,74 @@ go test -v ./internal/resolver  # Test specific package
 ```
 
 ## Architecture
+
+### System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "CLI Layer (internal/cli/)"
+        Root["root.go<br/>(Global flags)"]
+        Map["map.go<br/>(Alias management)"]
+        Ls["ls.go<br/>(List resources)"]
+        Info["info.go<br/>(Table info)"]
+        Cp["cp.go<br/>(Copy files)"]
+        Rm["rm.go<br/>(Remove resources)"]
+    end
+
+    subgraph "Resource Layer (internal/resource/)"
+        Factory["Factory<br/>(Create handlers)"]
+        Interface["Resource Interface<br/>(List, Remove, Info)"]
+        GCSRes["GCSResource"]
+        BQRes["BigQueryResource"]
+        IAMRes["IAMResource"]
+    end
+
+    subgraph "Resolution Layer"
+        Resolver["Resolver<br/>(Alias resolution)"]
+        Config["Config<br/>(YAML + env vars)"]
+        Wildcard["Wildcard<br/>(Pattern matching)"]
+    end
+
+    subgraph "Client Layer (Singletons)"
+        StorageClient["Storage Client<br/>(sync.Once)"]
+        BQClient["BigQuery Client<br/>(sync.Once)"]
+        IAMClient["IAM Client<br/>(sync.Once)"]
+    end
+
+    subgraph "Google Cloud APIs"
+        GCSAPI["Cloud Storage API"]
+        BQAPI["BigQuery API"]
+        IAMAPI["IAM API"]
+    end
+
+    Root --> Map
+    Root --> Ls
+    Root --> Info
+    Root --> Cp
+    Root --> Rm
+
+    Ls --> Resolver
+    Info --> Resolver
+    Cp --> Resolver
+    Rm --> Resolver
+
+    Resolver --> Config
+    Resolver --> Factory
+    Resolver --> Wildcard
+
+    Factory --> Interface
+    Interface --> GCSRes
+    Interface --> BQRes
+    Interface --> IAMRes
+
+    GCSRes --> StorageClient
+    BQRes --> BQClient
+    IAMRes --> IAMClient
+
+    StorageClient --> GCSAPI
+    BQClient --> BQAPI
+    IAMClient --> IAMAPI
+```
 
 ### Core Components
 
@@ -190,45 +258,55 @@ go test -v ./internal/resolver  # Test specific package
 ### Data Flow
 
 **GCS Operations:**
-```
-User Input (e.g., "cio ls :am/2024/")
-    ↓
-CLI Command (ls.go)
-    ↓
-Resolver.Resolve(":am/2024/")  →  strips : prefix, reads Config.Mappings
-    ↓
-"gs://bucket-name/2024/"
-    ↓
-storage.List(bucket, prefix)  →  uses singleton GCS client
-    ↓
-Formatter (short/long/human-readable)
-    ↓
-Resolver.ReverseResolve()  →  converts back to :am/2024/file.txt
-    ↓
-Output to stdout (with alias format)
+
+```mermaid
+flowchart TB
+    Input["User Input<br/>cio ls :am/2024/"]
+    CLI["CLI Command<br/>(ls.go)"]
+    Resolve["Resolver.Resolve()<br/>Strip : prefix<br/>Read Config.Mappings"]
+    FullPath["Full Path<br/>gs://bucket-name/2024/"]
+    Factory["Resource Factory<br/>Create(fullPath)"]
+    GCSRes["GCSResource<br/>Handler"]
+    List["storage.List()<br/>Singleton GCS client"]
+    Format["Formatter<br/>(short/long/human-readable)"]
+    Reverse["ReverseResolve()<br/>Convert to alias format"]
+    Output["Output to stdout<br/>:am/2024/file.txt"]
+
+    Input --> CLI
+    CLI --> Resolve
+    Resolve --> FullPath
+    FullPath --> Factory
+    Factory --> GCSRes
+    GCSRes --> List
+    List --> Format
+    Format --> Reverse
+    Reverse --> Output
 ```
 
 **BigQuery Operations:**
-```
-User Input (e.g., "cio ls :mydata" or "cio ls bq://project-id.dataset")
-    ↓
-CLI Command (ls.go)
-    ↓
-Resolver.Resolve(":mydata")  →  strips : prefix, reads Config.Mappings
-    ↓
-"bq://project-id.dataset"
-    ↓
-handleBigQueryList()  →  detects bq:// path
-    ↓
-bigquery.ParseBQPath()  →  splits into project/dataset/table components
-    ↓
-bigquery.ListDatasets() or bigquery.ListTables()  →  uses singleton BigQuery client
-    ↓
-BQObjectInfo formatting (short/long)
-    ↓
-Resolver.ReverseResolve()  →  converts back to :mydata.table1
-    ↓
-Output to stdout (with alias format)
+
+```mermaid
+flowchart TB
+    Input["User Input<br/>cio ls :mydata"]
+    CLI["CLI Command<br/>(ls.go)"]
+    Resolve["Resolver.Resolve()<br/>Strip : prefix<br/>Read Config.Mappings"]
+    FullPath["Full Path<br/>bq://project-id.dataset"]
+    Handle["handleBigQueryList()<br/>Detect bq:// path"]
+    Parse["bigquery.ParseBQPath()<br/>Split into components"]
+    List["bigquery.ListDatasets()<br/>or ListTables()<br/>Singleton BQ client"]
+    Format["BQObjectInfo<br/>formatting<br/>(short/long)"]
+    Reverse["ReverseResolve()<br/>Convert to alias format"]
+    Output["Output to stdout<br/>:mydata.table1"]
+
+    Input --> CLI
+    CLI --> Resolve
+    Resolve --> FullPath
+    FullPath --> Handle
+    Handle --> Parse
+    Parse --> List
+    List --> Format
+    Format --> Reverse
+    Reverse --> Output
 ```
 
 ## Important Patterns
@@ -322,6 +400,40 @@ for _, info := range resources {
 - Handle missing config gracefully (returns default config)
 - Expand env vars with `os.ExpandEnv()` during config load
 
+### Parallel Chunked Downloads
+- Files ≥10MB use parallel chunked download automatically (configurable via `download.parallel_threshold`)
+- Files <10MB use simple single-threaded download (no overhead)
+- Number of parallel chunks controlled by:
+  - `download.max_chunks` in config (default: 8, range: 1-32)
+  - `-j` flag limits max chunks (e.g., `-j 4` uses max 4 chunks)
+  - `-j 1` forces serial download (single chunk, useful for slow connections)
+- Each chunk downloaded in parallel using `storage.NewRangeReader()`
+- Chunk size automatically calculated: `fileSize / numChunks`
+- Progress updates every 2 seconds in verbose mode
+- Transfer rate and timing shown in verbose mode:
+  ```
+  Downloaded: file.zip → /tmp/file.zip (136 MB, 8 chunks in 4.19s, 32.51 MB/s)
+  ```
+
+**Why 8 chunks default?**
+- Good balance between speed and resource usage
+- Each chunk typically 8-20MB for files >100MB
+- Too many chunks (e.g., 32) can overwhelm connection and be slower
+- Too few chunks (e.g., 2) don't fully utilize parallel capabilities
+- Testing shows 4-8 chunks optimal for most network conditions
+
+**Examples:**
+```bash
+# Default: uses 8 parallel chunks for large files
+cio cp --verbose gs://bucket/large.zip /tmp/
+
+# Limit to 4 chunks (good for slower connections)
+cio cp -j 4 --verbose gs://bucket/large.zip /tmp/
+
+# Force serial download (1 chunk, useful for unstable connections)
+cio cp -j 1 --verbose gs://bucket/large.zip /tmp/
+```
+
 ### Error Messages
 - For missing aliases, suggest: `run 'cio map list' to see available mappings`
 - For auth issues, suggest: `run 'mise auth-setup' or 'gcloud auth application-default login'`
@@ -359,6 +471,10 @@ for _, info := range resources {
 
 ### Phase 5: Copy and Remove - Completed
 - ✅ `cp` command (local ↔ GCS, recursive, wildcards)
+- ✅ Parallel chunked downloads for large files (≥10MB)
+- ✅ Configurable chunk size and parallelism
+- ✅ Progress tracking and transfer rate reporting
+- ✅ `-j` flag to control parallelism
 - ✅ `rm` command for GCS (recursive, force, wildcards)
 - ✅ `rm` command for BigQuery (tables, datasets, wildcards)
 - ✅ Confirmation prompts with preview of items to be deleted

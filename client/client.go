@@ -200,7 +200,29 @@ func (s *StorageClient) DownloadFile(ctx context.Context, gcsPath, localPath str
 		return err
 	}
 
-	return storage.DownloadFile(ctx, bucket, object, localPath)
+	// Get GCS client
+	client, err := storage.GetClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create GCS client: %w", err)
+	}
+
+	// Create download options from config
+	// In the client library, use config parallelism as a limit for max chunks
+	maxChunks := s.config.Download.MaxChunks
+	if s.config.Defaults.Parallelism < maxChunks {
+		maxChunks = s.config.Defaults.Parallelism
+	}
+
+	opts := &storage.DownloadOptions{
+		ParallelThreshold: s.config.Download.ParallelThreshold,
+		ChunkSize:         s.config.Download.ChunkSize,
+		MaxChunks:         maxChunks,
+	}
+
+	// Use simple formatter (no alias reverse mapping for library API)
+	formatter := func(path string) string { return path }
+
+	return storage.DownloadFile(ctx, client, bucket, object, localPath, false, formatter, opts)
 }
 
 // UploadFile uploads a local file to GCS.
@@ -211,13 +233,16 @@ func (s *StorageClient) UploadFile(ctx context.Context, localPath, gcsPath strin
 		return err
 	}
 
-	// Parse GCS path
-	bucket, object, err := resolver.ParseGCSPath(fullPath)
+	// Get GCS client
+	client, err := storage.GetClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create GCS client: %w", err)
 	}
 
-	return storage.UploadFile(ctx, localPath, bucket, object)
+	// Use simple formatter (no alias reverse mapping for library API)
+	formatter := func(path string) string { return path }
+
+	return storage.UploadFile(ctx, client, localPath, fullPath, false, formatter)
 }
 
 // RemoveObject removes a single object from GCS.
@@ -234,7 +259,16 @@ func (s *StorageClient) RemoveObject(ctx context.Context, gcsPath string) error 
 		return err
 	}
 
-	return storage.RemoveObject(ctx, bucket, object)
+	// Get GCS client
+	client, err := storage.GetClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create GCS client: %w", err)
+	}
+
+	// Use simple formatter (no alias reverse mapping for library API)
+	formatter := func(path string) string { return path }
+
+	return storage.RemoveObject(ctx, client, bucket, object, false, formatter)
 }
 
 // BigQueryClient provides methods for interacting with Google BigQuery.

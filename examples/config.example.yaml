@@ -20,7 +20,26 @@ defaults:
   # Higher values speed up operations on large numbers of files but use more resources
   parallelism: 50
 
-# Web server configuration (for Phase 4)
+# Download configuration for parallel chunked downloads
+download:
+  # Minimum file size (in bytes) to use parallel chunked download
+  # Files larger than this will be downloaded using multiple parallel chunks
+  # Default: 10485760 (10MB)
+  parallel_threshold: 10485760
+
+  # Size of each chunk for parallel downloads (in bytes)
+  # Larger chunks = fewer connections, less memory overhead
+  # Valid range: 1048576 (1MB) to 33554432 (32MB)
+  # Default: 8388608 (8MB)
+  chunk_size: 8388608
+
+  # Maximum number of parallel chunks per file
+  # More chunks = faster for large files, but uses more memory
+  # Valid range: 1 to 32
+  # Default: 8
+  max_chunks: 8
+
+# Web server configuration for 'cio ui' command
 server:
   # Port for web server
   port: 8080
@@ -28,5 +47,5 @@ server:
   # Host to bind to (localhost by default for security)
   host: localhost
 
-  # Auto-start server on first use
-  auto_start: false
+  # Auto-open browser when starting web UI
+  auto_start: true

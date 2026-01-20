@@ -164,9 +164,23 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 		formatter = func(path string) string { return path }
 	}
 
+	// Create download options from config
+	// Respect parallelism flag as a limit for max chunks
+	maxChunks := cfg.Download.MaxChunks
+	parallelism := GetParallelism()
+	if parallelism < maxChunks {
+		maxChunks = parallelism
+	}
+
+	opts := &storage.DownloadOptions{
+		ParallelThreshold: cfg.Download.ParallelThreshold,
+		ChunkSize:         cfg.Download.ChunkSize,
+		MaxChunks:         maxChunks,
+	}
+
 	// Check if path contains wildcards
 	if resolver.HasWildcard(object) {
-		return storage.DownloadWithPattern(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism())
+		return storage.DownloadWithPattern(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism(), opts)
 	}
 
 	// Check if this is a directory (ends with / or no object specified)
@@ -174,8 +188,8 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 		if !cpRecursive {
 			return fmt.Errorf("%q appears to be a directory (use -r to copy recursively)", gcsPath)
 		}
-		return storage.DownloadDirectory(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism())
+		return storage.DownloadDirectory(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism(), opts)
 	}
 
-	return storage.DownloadFile(ctx, client, bucket, object, localPath, verbose, formatter)
+	return storage.DownloadFile(ctx, client, bucket, object, localPath, verbose, formatter, opts)
 }
