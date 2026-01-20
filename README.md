@@ -403,6 +403,53 @@ cio map show am
 cio map delete am
 ```
 
+### Authentication
+
+#### Print Access Token
+
+Print an OAuth 2.0 access token for authenticating with Google Cloud APIs.
+
+```bash
+# Using Application Default Credentials (ADC)
+cio auth print-access-token
+
+# Using service account JSON file
+cio auth print-access-token -c /path/to/service-account.json
+
+# Use in curl command
+curl -H "Authorization: Bearer $(cio auth print-access-token)" \
+  https://storage.googleapis.com/storage/v1/b
+```
+
+**Flags:**
+- `-c, --credentials` - Path to service account JSON file
+
+Similar to `gcloud auth print-access-token`.
+
+#### Print Identity Token
+
+Print an OpenID Connect (OIDC) identity token for authenticating with services that require identity tokens (e.g., Cloud Run, Cloud Functions).
+
+```bash
+# Using ADC with Cloud Run service (audience required)
+cio auth print-identity-token -a https://my-service-abc123.run.app
+
+# Using service account
+cio auth print-identity-token \
+  -a https://my-service.run.app \
+  -c /path/to/service-account.json
+
+# Use in curl command to call Cloud Run
+curl -H "Authorization: Bearer $(cio auth print-identity-token -a https://my-service.run.app)" \
+  https://my-service-abc123.run.app
+```
+
+**Flags:**
+- `-a, --audience` - Target audience URL (required)
+- `-c, --credentials` - Path to service account JSON file
+
+Similar to `gcloud auth print-identity-token`.
+
 ### Listing Objects
 
 #### Basic Listing
@@ -465,16 +512,16 @@ cio ls --max-results 100 am
 
 ## Migration from gcloud
 
-### Before (gcloud)
+### Storage Commands
 
+**Before (gcloud):**
 ```bash
 gcloud storage ls gs://io-spooler-onprem-archived-metrics/
 gcloud storage ls -l gs://io-spooler-onprem-archived-metrics/2024/
 gcloud storage ls -L gs://io-spooler-onprem-archived-metrics/
 ```
 
-### After (cio)
-
+**After (cio):**
 ```bash
 # One-time setup
 cio map am gs://io-spooler-onprem-archived-metrics/
@@ -483,6 +530,20 @@ cio map am gs://io-spooler-onprem-archived-metrics/
 cio ls am
 cio ls -l am/2024/
 cio ls -r am
+```
+
+### Authentication Commands
+
+**Before (gcloud):**
+```bash
+gcloud auth print-access-token
+gcloud auth print-identity-token --audiences=https://my-service.run.app
+```
+
+**After (cio):**
+```bash
+cio auth print-access-token
+cio auth print-identity-token -a https://my-service.run.app
 ```
 
 ## Architecture
