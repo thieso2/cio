@@ -447,6 +447,31 @@ cio map show am
 cio map delete am
 ```
 
+### IAM Service Accounts
+
+List IAM service accounts in a project.
+
+```bash
+# List service accounts (short format - email only)
+cio ls iam://my-project-id/service-accounts
+
+# List with details (email, display name, disabled status)
+cio ls -l iam://my-project-id/service-accounts
+```
+
+**Output format:**
+- **Short**: Service account email only
+- **Long**: Email, Display Name, Disabled status in columnar format
+
+**Example output (long format):**
+```
+EMAIL                                                        DISPLAY_NAME                   DISABLED
+my-sa@project.iam.gserviceaccount.com                       My Service Account             False
+another-sa@project.iam.gserviceaccount.com                  Another Service Account        True
+```
+
+Similar to `gcloud iam service-accounts list`.
+
 ### Authentication
 
 #### Print Access Token
