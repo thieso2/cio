@@ -18,18 +18,29 @@ const (
 
 	// DefaultServerHost is the default host for the web server
 	DefaultServerHost = "localhost"
+
+	// DefaultParallelism is the default number of concurrent operations for cp/rm
+	DefaultParallelism = 50
+
+	// MinParallelism is the minimum allowed parallelism value
+	MinParallelism = 1
+
+	// MaxParallelism is the maximum allowed parallelism value
+	MaxParallelism = 200
 )
 
 // Defaults holds default configuration values
 type Defaults struct {
-	Region    string `yaml:"region"`
-	ProjectID string `yaml:"project_id"`
+	Region      string `yaml:"region"`
+	ProjectID   string `yaml:"project_id"`
+	Parallelism int    `yaml:"parallelism"`
 }
 
 // GetDefaults returns the default configuration values
 func GetDefaults() Defaults {
 	return Defaults{
-		Region:    DefaultRegion,
-		ProjectID: "",
+		Region:      DefaultRegion,
+		ProjectID:   "",
+		Parallelism: DefaultParallelism,
 	}
 }

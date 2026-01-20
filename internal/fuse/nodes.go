@@ -25,6 +25,7 @@ func (n *RootNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	entries := []fuse.DirEntry{
 		{Name: "storage", Mode: fuse.S_IFDIR},
 		{Name: "bigquery", Mode: fuse.S_IFDIR},
+		{Name: "iam", Mode: fuse.S_IFDIR},
 		{Name: "pubsub", Mode: fuse.S_IFDIR},
 	}
 	return fs.NewListDirStream(entries), 0
@@ -42,7 +43,7 @@ func (n *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 // Lookup finds a child node by name (service directory)
 func (n *RootNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// Only allow known service names
-	if name != "storage" && name != "bigquery" && name != "pubsub" {
+	if name != "storage" && name != "bigquery" && name != "iam" && name != "pubsub" {
 		return nil, syscall.ENOENT
 	}
 
@@ -73,6 +74,7 @@ var _ fs.NodeLookuper = (*ServiceNode)(nil)
 // Readdir lists resources under the service
 // For storage service, lists all buckets
 // For bigquery service, lists all datasets
+// For iam service, lists resource types (service-accounts)
 // For other services, returns empty list
 func (n *ServiceNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	if n.serviceName == "storage" {
@@ -83,6 +85,11 @@ func (n *ServiceNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno)
 	if n.serviceName == "bigquery" {
 		// Delegate to BigQuery dataset listing
 		return listBQDatasets(ctx, n.projectID)
+	}
+
+	if n.serviceName == "iam" {
+		// Delegate to IAM resource type listing
+		return listIAMResourceTypes(ctx)
 	}
 
 	// For other services, return empty
@@ -102,6 +109,7 @@ func (n *ServiceNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.At
 // Lookup finds a child node by name
 // For storage service, looks up bucket by name
 // For bigquery service, looks up dataset by name
+// For iam service, looks up resource type by name
 // For other services, returns ENOENT
 func (n *ServiceNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	// Ignore files starting with "." (like .DS_Store)
@@ -129,6 +137,18 @@ func (n *ServiceNode) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 		child := n.NewInode(ctx, &DatasetNode{
 			projectID: n.projectID,
 			datasetID: name,
+		}, stable)
+		return child, 0
+	}
+
+	if n.serviceName == "iam" {
+		// Create an IAMResourceTypeNode for the requested resource type
+		stable := fs.StableAttr{
+			Mode: fuse.S_IFDIR,
+		}
+		child := n.NewInode(ctx, &IAMResourceTypeNode{
+			projectID:    n.projectID,
+			resourceType: name,
 		}, stable)
 		return child, 0
 	}

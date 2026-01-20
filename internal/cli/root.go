@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/config"
@@ -10,10 +11,11 @@ import (
 
 var (
 	// Global flags
-	cfgFile   string
-	projectID string
-	region    string
-	verbose   bool
+	cfgFile     string
+	projectID   string
+	region      string
+	verbose     bool
+	parallelism int // Number of concurrent operations (cp/rm)
 
 	// Global config instance
 	cfg *config.Config
@@ -86,6 +88,22 @@ Examples:
 			cfg.Defaults.Region = region
 		}
 
+		// Handle parallelism configuration priority:
+		// 1. Command-line flag (if not default)
+		// 2. Environment variable CIO_PARALLEL
+		// 3. Config file value
+		// 4. Default value (50)
+		if cmd.Flags().Changed("parallel") {
+			// Flag was explicitly set, use it
+			cfg.Defaults.Parallelism = parallelism
+		} else if envParallel := os.Getenv("CIO_PARALLEL"); envParallel != "" {
+			// Try environment variable
+			if val, err := strconv.Atoi(envParallel); err == nil {
+				cfg.Defaults.Parallelism = val
+			}
+		}
+		// Otherwise use config file value or default (already set in config)
+
 		// Validate config
 		if err := cfg.Validate(); err != nil {
 			return fmt.Errorf("invalid configuration: %w", err)
@@ -95,6 +113,7 @@ Examples:
 			fmt.Fprintf(os.Stderr, "Config loaded from: %s\n", cfg.GetFilePath())
 			fmt.Fprintf(os.Stderr, "Project: %s\n", cfg.Defaults.ProjectID)
 			fmt.Fprintf(os.Stderr, "Region: %s\n", cfg.Defaults.Region)
+			fmt.Fprintf(os.Stderr, "Parallelism: %d\n", cfg.Defaults.Parallelism)
 		}
 
 		return nil
@@ -112,9 +131,24 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP project ID (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&region, "region", "", "GCP region (overrides config)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().IntVarP(&parallelism, "parallel", "j", 50, "number of parallel operations for cp/rm (1-200, can also be set via CIO_PARALLEL env var or config file)")
 }
 
 // GetConfig returns the global config instance
 func GetConfig() *config.Config {
 	return cfg
+}
+
+// GetParallelism returns the configured parallelism level
+// Returns a value between 1 and 200
+func GetParallelism() int {
+	// Use the config value which has already been resolved from flag/env/config
+	val := cfg.Defaults.Parallelism
+	if val < config.MinParallelism {
+		return config.MinParallelism
+	}
+	if val > config.MaxParallelism {
+		return config.MaxParallelism
+	}
+	return val
 }

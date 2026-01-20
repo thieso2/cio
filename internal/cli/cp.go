@@ -143,7 +143,7 @@ func uploadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver, l
 		if !cpRecursive {
 			return fmt.Errorf("%q is a directory (use -r to copy recursively)", localPath)
 		}
-		return storage.UploadDirectory(ctx, client, localPath, gcsPath, verbose, formatter)
+		return storage.UploadDirectory(ctx, client, localPath, gcsPath, verbose, formatter, GetParallelism())
 	}
 
 	return storage.UploadFile(ctx, client, localPath, gcsPath, verbose, formatter)
@@ -166,7 +166,7 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 
 	// Check if path contains wildcards
 	if resolver.HasWildcard(object) {
-		return storage.DownloadWithPattern(ctx, client, bucket, object, localPath, verbose, formatter)
+		return storage.DownloadWithPattern(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism())
 	}
 
 	// Check if this is a directory (ends with / or no object specified)
@@ -174,7 +174,7 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 		if !cpRecursive {
 			return fmt.Errorf("%q appears to be a directory (use -r to copy recursively)", gcsPath)
 		}
-		return storage.DownloadDirectory(ctx, client, bucket, object, localPath, verbose, formatter)
+		return storage.DownloadDirectory(ctx, client, bucket, object, localPath, verbose, formatter, GetParallelism())
 	}
 
 	return storage.DownloadFile(ctx, client, bucket, object, localPath, verbose, formatter)

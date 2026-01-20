@@ -4,9 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
+)
+
+// Default parallelism constants
+const (
+	// DefaultConcurrentDeletes is the default number of concurrent delete operations
+	DefaultConcurrentDeletes = 50
 )
 
 // RemoveObject removes a single object from GCS
@@ -28,18 +36,19 @@ func RemoveObject(ctx context.Context, client *storage.Client, bucket, object st
 }
 
 // RemoveDirectory removes all objects with a given prefix
-func RemoveDirectory(ctx context.Context, client *storage.Client, bucket, prefix string, verbose bool, formatter PathFormatter) error {
+func RemoveDirectory(ctx context.Context, client *storage.Client, bucket, prefix string, verbose bool, formatter PathFormatter, maxWorkers int) error {
 	if formatter == nil {
 		formatter = DefaultPathFormatter
 	}
 
-	// List all objects with the prefix
+	// List all objects with the prefix first to get total count
 	bkt := client.Bucket(bucket)
 	query := &storage.Query{
 		Prefix: prefix,
 	}
 
-	deleteCount := 0
+	// First pass: collect all objects to delete
+	var objectsToDelete []string
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
@@ -49,32 +58,20 @@ func RemoveDirectory(ctx context.Context, client *storage.Client, bucket, prefix
 		if err != nil {
 			return fmt.Errorf("failed to list objects: %w", err)
 		}
-
-		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, attrs.Name)
-
-		// Delete the object
-		obj := bkt.Object(attrs.Name)
-		if err := obj.Delete(ctx); err != nil {
-			return fmt.Errorf("failed to delete %s: %w", formatter(fullGCSPath), err)
-		}
-
-		// Always log deletions line-by-line
-		fmt.Printf("Deleted: %s\n", formatter(fullGCSPath))
-		deleteCount++
+		objectsToDelete = append(objectsToDelete, attrs.Name)
 	}
 
-	if deleteCount == 0 {
+	totalCount := len(objectsToDelete)
+	if totalCount == 0 {
 		return fmt.Errorf("no objects found with prefix gs://%s/%s", bucket, prefix)
 	}
 
-	if deleteCount > 1 {
-		fmt.Printf("\nTotal: %d objects deleted\n", deleteCount)
-	}
-	return nil
+	// Second pass: delete in parallel with progress counter
+	return deleteObjectsParallel(ctx, client, bucket, objectsToDelete, totalCount, formatter, maxWorkers)
 }
 
 // RemoveWithPattern removes objects matching a wildcard pattern
-func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, pattern string, verbose bool, formatter PathFormatter) error {
+func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, pattern string, verbose bool, formatter PathFormatter, maxWorkers int) error {
 	if formatter == nil {
 		formatter = DefaultPathFormatter
 	}
@@ -88,7 +85,8 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 		Prefix: prefix,
 	}
 
-	deleteCount := 0
+	// First pass: collect all matching objects
+	var objectsToDelete []string
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
@@ -104,25 +102,92 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 			continue
 		}
 
-		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, attrs.Name)
-
-		// Delete the object
-		obj := bkt.Object(attrs.Name)
-		if err := obj.Delete(ctx); err != nil {
-			return fmt.Errorf("failed to delete %s: %w", formatter(fullGCSPath), err)
-		}
-
-		// Always log deletions line-by-line
-		fmt.Printf("Deleted: %s\n", formatter(fullGCSPath))
-		deleteCount++
+		objectsToDelete = append(objectsToDelete, attrs.Name)
 	}
 
-	if deleteCount == 0 {
+	totalCount := len(objectsToDelete)
+	if totalCount == 0 {
 		return fmt.Errorf("no objects found matching pattern: %s", pattern)
 	}
 
-	if deleteCount > 1 {
-		fmt.Printf("\nTotal: %d objects deleted\n", deleteCount)
+	// Second pass: delete in parallel with progress counter
+	return deleteObjectsParallel(ctx, client, bucket, objectsToDelete, totalCount, formatter, maxWorkers)
+}
+
+// deleteObjectsParallel deletes objects in parallel with controlled concurrency
+func deleteObjectsParallel(ctx context.Context, client *storage.Client, bucket string, objectsToDelete []string, totalCount int, formatter PathFormatter, maxWorkers int) error {
+	// Create a semaphore to limit concurrent deletes
+	sem := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	var completedCount int32
+
+	// Channel for completed deletions (for progress tracking)
+	type deletion struct {
+		objectName string
+		err        error
+	}
+	deletions := make(chan deletion, totalCount)
+
+	// Start progress reporter goroutine
+	done := make(chan struct{})
+	go func() {
+		for d := range deletions {
+			count := atomic.AddInt32(&completedCount, 1)
+
+			if d.err != nil {
+				fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, d.objectName)
+				fmt.Printf("Failed %d/%d: %s - %v\n", count, totalCount, formatter(fullGCSPath), d.err)
+
+				// Store first error
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = d.err
+				}
+				mu.Unlock()
+			} else {
+				fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, d.objectName)
+				fmt.Printf("Deleted %d/%d: %s\n", count, totalCount, formatter(fullGCSPath))
+			}
+		}
+		close(done)
+	}()
+
+	// Delete objects in parallel
+	bkt := client.Bucket(bucket)
+	for _, objectName := range objectsToDelete {
+		wg.Add(1)
+
+		// Acquire semaphore
+		sem <- struct{}{}
+
+		go func(objName string) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
+
+			// Delete the object
+			obj := bkt.Object(objName)
+			err := obj.Delete(ctx)
+
+			// Send result to progress reporter
+			deletions <- deletion{objectName: objName, err: err}
+		}(objectName)
+	}
+
+	// Wait for all deletions to complete
+	wg.Wait()
+	close(deletions)
+
+	// Wait for progress reporter to finish
+	<-done
+
+	if firstErr != nil {
+		return fmt.Errorf("deletion failed: %w", firstErr)
+	}
+
+	if totalCount > 1 {
+		fmt.Printf("\nTotal: %d objects deleted\n", totalCount)
 	}
 	return nil
 }

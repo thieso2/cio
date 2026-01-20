@@ -44,11 +44,13 @@ func (n *MetaDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, syscall.
 	it := bucket.Objects(ctx, query)
 
 	entries := []fuse.DirEntry{
-		{Name: "_bucket.json", Mode: fuse.S_IFREG},
+		{Name: "metadata.json", Mode: fuse.S_IFREG},
+		{Name: "iam-policy", Mode: fuse.S_IFDIR},
 	}
 
 	seen := make(map[string]bool)
-	seen["_bucket.json"] = true
+	seen["metadata.json"] = true
+	seen["iam-policy"] = true
 
 	for {
 		attrs, err := it.Next()
@@ -94,8 +96,17 @@ func (n *MetaDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *f
 
 // Lookup finds a metadata file by name
 func (n *MetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// Handle IAM policy directory
+	if name == "iam-policy" {
+		stable := fs.StableAttr{Mode: fuse.S_IFDIR}
+		child := n.NewInode(ctx, &GCSIAMPolicyDirectoryNode{
+			bucketName: n.bucketName,
+		}, stable)
+		return child, 0
+	}
+
 	// Handle bucket metadata
-	if name == "_bucket.json" {
+	if name == "metadata.json" {
 		stable := fs.StableAttr{
 			Mode: fuse.S_IFREG,
 		}
@@ -139,7 +150,7 @@ func (n *MetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse.E
 	return nil, syscall.ENOENT
 }
 
-// BucketMetaFileNode represents the _bucket.json metadata file
+// BucketMetaFileNode represents the metadata.json metadata file
 type BucketMetaFileNode struct {
 	fs.Inode
 	bucketName string

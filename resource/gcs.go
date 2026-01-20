@@ -128,16 +128,22 @@ func (g *GCSResource) Remove(ctx context.Context, path string, options *RemoveOp
 	// Convert to storage.PathFormatter
 	storageFormatter := storage.PathFormatter(g.formatter)
 
+	// Use parallelism from options, default to 50 if not set
+	parallelism := options.Parallelism
+	if parallelism == 0 {
+		parallelism = storage.DefaultConcurrentDeletes
+	}
+
 	// Check if path contains wildcards
 	if resolver.HasWildcard(object) {
-		return storage.RemoveWithPattern(ctx, client, bucket, object, options.Verbose, storageFormatter)
+		return storage.RemoveWithPattern(ctx, client, bucket, object, options.Verbose, storageFormatter, parallelism)
 	}
 
 	// Check if this is a directory or single object
 	isDirectory := object == "" || object[len(object)-1] == '/'
 
 	if isDirectory {
-		return storage.RemoveDirectory(ctx, client, bucket, object, options.Verbose, storageFormatter)
+		return storage.RemoveDirectory(ctx, client, bucket, object, options.Verbose, storageFormatter, parallelism)
 	}
 
 	return storage.RemoveObject(ctx, client, bucket, object, options.Verbose, storageFormatter)

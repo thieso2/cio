@@ -9,7 +9,8 @@ A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gclo
 - **Alias Mappings**: Map short aliases to full GCS bucket paths and BigQuery datasets
 - **GCS Operations**: List, copy, remove files with familiar Unix-like commands
 - **BigQuery Support**: List datasets, tables, view schemas, and manage BigQuery resources
-- **🧪 FUSE Filesystem** ⚠️ **EXPERIMENTAL & 100% AI-GENERATED**: Mount GCS buckets and BigQuery datasets as local filesystems (alpha quality, use with caution)
+- **IAM Support**: List and view IAM service accounts
+- **🧪 FUSE Filesystem** ⚠️ **EXPERIMENTAL & 100% AI-GENERATED**: Mount GCS buckets, BigQuery datasets, and IAM service accounts as local filesystems (alpha quality, use with caution)
 - **Wildcard Support**: Use `*.log`, `events_*` patterns for bulk operations
 - **Fast**: Built in Go with metadata caching for speed and efficiency
 - **Simple Configuration**: YAML-based configuration with environment variable support
@@ -200,7 +201,7 @@ cio rm -f :am/old-data/
 >
 > If you encounter issues, please report them on GitHub, but understand that support is limited.
 
-The FUSE filesystem allows you to mount Google Cloud Storage buckets and BigQuery datasets as local filesystems, enabling you to browse and interact with cloud resources using standard filesystem tools (`ls`, `cat`, `grep`, etc.).
+The FUSE filesystem allows you to mount Google Cloud Storage buckets, BigQuery datasets, and IAM service accounts as local filesystems, enabling you to browse and interact with cloud resources using standard filesystem tools (`ls`, `cat`, `grep`, etc.).
 
 ### Prerequisites
 
@@ -238,26 +239,30 @@ fusermount -u ~/gcs
 
 ### Filesystem Structure
 
-Once mounted, you'll see a directory for each configured alias:
+Once mounted, you'll see service directories:
 
 ```
 ~/gcs/
-├── am/              # :am alias → gs://bucket-name/
-│   ├── .meta/       # Metadata directory
-│   │   ├── bucket_metadata.json
-│   │   └── _cache/  # Cached metadata
-│   ├── 2024/
-│   │   └── logs/
-│   └── data.csv
-└── mydata/          # :mydata alias → bq://project.dataset
-    ├── .meta/       # Metadata directory
-    │   └── dataset_metadata.json
-    ├── table1/
-    │   ├── schema.json
-    │   └── metadata.json
-    └── table2/
-        ├── schema.json
-        └── metadata.json
+├── storage/         # GCS buckets
+│   └── my-bucket/
+│       ├── .meta/   # Metadata directory
+│       ├── 2024/
+│       └── data.csv
+├── bigquery/        # BigQuery datasets
+│   └── my-dataset/
+│       ├── .meta/   # Metadata directory
+│       ├── table1/
+│       │   ├── schema.json
+│       │   └── metadata.json
+│       └── table2/
+│           ├── schema.json
+│           └── metadata.json
+└── iam/             # IAM resources
+    └── service-accounts/
+        ├── account1@project.iam.gserviceaccount.com/
+        │   └── metadata.json
+        └── account2@project.iam.gserviceaccount.com/
+            └── metadata.json
 ```
 
 ### Features
@@ -276,6 +281,11 @@ Once mounted, you'll see a directory for each configured alias:
 - ✅ View table metadata (`metadata.json`)
 - ✅ Metadata caching for performance
 
+**IAM Support:**
+- ✅ Browse service accounts as directories
+- ✅ View service account metadata (`metadata.json`)
+- ✅ Metadata caching for performance
+
 ### Metadata Files
 
 Special `.meta/` directories contain metadata about the resources:
@@ -287,8 +297,13 @@ cat ~/gcs/am/.meta/bucket_metadata.json
 
 **BigQuery Tables:**
 ```bash
-cat ~/gcs/mydata/table1/schema.json
-cat ~/gcs/mydata/table1/metadata.json
+cat ~/gcs/bigquery/my-dataset/table1/schema.json
+cat ~/gcs/bigquery/my-dataset/table1/metadata.json
+```
+
+**IAM Service Accounts:**
+```bash
+cat ~/gcs/iam/service-accounts/my-sa@project.iam.gserviceaccount.com/metadata.json
 ```
 
 ### Advanced Options
@@ -404,6 +419,7 @@ mappings:
 defaults:
   region: europe-west3
   project_id: ${PROJECT_ID}
+  parallelism: 50  # Number of concurrent operations for cp/rm (1-200)
 
 server:
   port: 8080
@@ -412,6 +428,33 @@ server:
 ```
 
 See [examples/config.example.yaml](examples/config.example.yaml) for a complete example.
+
+### Parallelism Configuration
+
+The number of concurrent operations for `cp` (copy) and `rm` (remove) commands can be configured in three ways (listed in priority order):
+
+1. **Command-line flag**: `--parallel` or `-j`
+   ```bash
+   cio cp -j 100 -r ./large-dir/ :am/backup/
+   cio rm -j 75 ':am/temp/*'
+   ```
+
+2. **Environment variable**: `CIO_PARALLEL`
+   ```bash
+   export CIO_PARALLEL=100
+   cio cp -r ./large-dir/ :am/backup/
+   ```
+
+3. **Config file**: `defaults.parallelism` field
+   ```yaml
+   defaults:
+     parallelism: 100
+   ```
+
+**Default value**: 50 concurrent operations
+**Valid range**: 1-200
+
+Higher parallelism speeds up operations on large numbers of files but uses more network connections and memory. Lower values reduce resource usage but may be slower.
 
 ## Commands
 

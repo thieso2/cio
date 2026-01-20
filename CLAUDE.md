@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage and BigQuery that replaces lengthy `gcloud storage` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full GCS bucket paths and BigQuery paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls :mydata` instead of `bq ls project-id:dataset`.
+`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, and IAM that replaces lengthy `gcloud storage`, `bq`, and `gcloud iam` commands with short, memorable aliases. It maps user-defined aliases to full GCS bucket paths, BigQuery paths, and IAM paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls :mydata` instead of `bq ls project-id:dataset`.
 
 **Alias Syntax:**
 - Aliases are prefixed with `:` to distinguish them from regular paths
@@ -12,16 +12,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Used with `:` prefix: `cio ls :am/path/` or `cio ls :mydata`
 
 **Key capabilities:**
-- Alias-based path resolution for both GCS and BigQuery
+- Alias-based path resolution for GCS, BigQuery, and IAM
   - GCS: `:am` → `gs://bucket-name/`
   - BigQuery: `:mydata` → `bq://project-id.dataset`
+  - IAM: Direct paths like `iam://project-id/service-accounts`
 - Familiar Unix-like commands (`ls`, `cp`, `rm` with various flags)
 - Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS commands
 - BigQuery listing: datasets, tables, and table schemas
+- IAM listing: service accounts with metadata
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
-- Singleton client pattern for performance (both GCS and BigQuery)
+- Singleton client pattern for performance (GCS, BigQuery, and IAM)
 - Bidirectional file transfer (local ↔ GCS)
+- FUSE filesystem support for GCS, BigQuery, and IAM (experimental)
 
 ## Development Commands
 
@@ -66,7 +69,7 @@ go test -v ./internal/resolver  # Test specific package
 ### Core Components
 
 **0. Resource Abstraction Layer (`internal/resource/`)**
-- **Unified interface** for all resource types (GCS, BigQuery)
+- **Unified interface** for all resource types (GCS, BigQuery, IAM)
 - `Resource` interface defines common operations:
   - `List()` - list resources at a path
   - `Remove()` - delete resources
@@ -76,6 +79,7 @@ go test -v ./internal/resolver  # Test specific package
 - Implementations:
   - `GCSResource` - handles GCS objects and directories
   - `BigQueryResource` - handles BigQuery datasets and tables
+  - `IAMResource` - handles IAM service accounts
 - `Factory` - creates appropriate resource handler based on path type
 - `ResourceInfo` - unified data structure for resource metadata
 - Benefits:
@@ -98,6 +102,7 @@ go test -v ./internal/resolver  # Test specific package
 - Path detection:
   - `IsGCSPath()` checks for `gs://` prefix
   - `IsBQPath()` checks for `bq://` prefix
+  - `IsIAMPath()` checks for `iam://` prefix
 - **Important**: Input must start with `:` for alias paths (e.g., `:am/path` or `:mydata`)
 
 **2. Configuration System (`internal/config/`)**
@@ -129,17 +134,29 @@ go test -v ./internal/resolver  # Test specific package
 - `BQObjectInfo` type for formatting BigQuery results
 - `Close()` should be called when program exits
 
+**3c. IAM Client (`iam/`)**
+- **Singleton pattern**: `GetClient()` uses `sync.Once` to create IAM client once per process
+- Authentication via ADC (Application Default Credentials)
+- Operations:
+  - `ListServiceAccounts()` - lists service accounts in a project
+  - `GetServiceAccount()` - gets details about a specific service account
+  - `ParseIAMPath()` - parses `iam://project-id/resource-type` paths
+- `ServiceAccountInfo` type for formatting service account results
+- `Close()` should be called when program exits
+
 **4. CLI Commands (`internal/cli/`)**
 - **root.go**: Global flags (`--config`, `--project`, `--region`, `--verbose`)
   - `PersistentPreRunE` loads config and overrides with CLI flags
 - **map.go**: Manage alias mappings (`map <alias> <path>`, `map list`, `map show`, `map delete`)
   - Aliases created without `:` but used with it
-- **ls.go**: List GCS objects or BigQuery datasets/tables
+- **ls.go**: List GCS objects, BigQuery datasets/tables, or IAM service accounts
   - GCS: formatting options (`-l`, `-r`, `--human-readable`, `--max-results`)
   - GCS wildcards: `cio ls ':am/logs/*.log'`
   - BigQuery: lists datasets (`bq://project`) or tables (`bq://project.dataset`)
   - BigQuery wildcards: `cio ls ':mydata.events_*'`
   - BigQuery `-l` shows type, size, and row counts
+  - IAM: lists service accounts (`iam://project-id/service-accounts`)
+  - IAM `-l` shows email, display name, and disabled status
   - Output uses alias format: `:am/file.txt` or `:mydata.table1`
   - `handleBigQueryList()` function handles BigQuery-specific listing
 - **info.go**: Show detailed BigQuery table information
@@ -411,6 +428,20 @@ cio rm -r :mydata
 
 # Force remove without confirmation
 cio rm -f :mydata.old_table
+```
+
+### IAM Examples
+```bash
+# List service accounts (short format - email only)
+cio ls iam://my-project-id/service-accounts
+
+# List with details (email, display name, disabled status)
+cio ls -l iam://my-project-id/service-accounts
+
+# FUSE filesystem - mount and browse service accounts
+cio mount ~/gcs
+ls ~/gcs/iam/service-accounts/
+cat ~/gcs/iam/service-accounts/my-sa@project.iam.gserviceaccount.com/metadata.json
 ```
 
 ## Future Features (Phase 6+)

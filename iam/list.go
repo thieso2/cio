@@ -155,3 +155,91 @@ func ParseIAMPath(path string) (projectID string, resourceType string, err error
 
 // DummyTime is a placeholder time for service accounts (they don't have modification times)
 var DummyTime = time.Now()
+
+// ServiceAccountKeyInfo represents information about a service account key.
+type ServiceAccountKeyInfo struct {
+	Name            string
+	KeyID           string
+	KeyType         string // USER_MANAGED or SYSTEM_MANAGED
+	ValidAfterTime  time.Time
+	ValidBeforeTime time.Time
+	KeyAlgorithm    string
+	Disabled        bool
+}
+
+// ListServiceAccountKeys lists all keys for a service account.
+func ListServiceAccountKeys(ctx context.Context, projectID, accountEmail string) ([]*ServiceAccountKeyInfo, error) {
+	client, err := GetClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create IAM client: %w", err)
+	}
+
+	// Construct service account resource name
+	resourceName := fmt.Sprintf("projects/%s/serviceAccounts/%s", projectID, accountEmail)
+
+	// List keys
+	resp, err := client.Projects.ServiceAccounts.Keys.List(resourceName).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list service account keys: %w", err)
+	}
+
+	var keys []*ServiceAccountKeyInfo
+	for _, key := range resp.Keys {
+		// Extract key ID from name (format: projects/{project}/serviceAccounts/{account}/keys/{keyid})
+		keyID := ""
+		if len(key.Name) > 0 {
+			parts := []rune(key.Name)
+			lastSlash := -1
+			for i := len(parts) - 1; i >= 0; i-- {
+				if parts[i] == '/' {
+					lastSlash = i
+					break
+				}
+			}
+			if lastSlash != -1 && lastSlash < len(parts)-1 {
+				keyID = string(parts[lastSlash+1:])
+			}
+		}
+
+		validAfter, _ := time.Parse(time.RFC3339, key.ValidAfterTime)
+		validBefore, _ := time.Parse(time.RFC3339, key.ValidBeforeTime)
+
+		keys = append(keys, &ServiceAccountKeyInfo{
+			Name:            key.Name,
+			KeyID:           keyID,
+			KeyType:         key.KeyType,
+			ValidAfterTime:  validAfter,
+			ValidBeforeTime: validBefore,
+			KeyAlgorithm:    key.KeyAlgorithm,
+			Disabled:        key.Disabled,
+		})
+	}
+
+	return keys, nil
+}
+
+// UsageInfo represents a resource where a service account has permissions.
+type UsageInfo struct {
+	ResourceType string // "storage", "bigquery", "compute", etc.
+	ResourceName string // bucket name, dataset name, instance name, etc.
+	Roles        []string
+}
+
+// GetServiceAccountUsage finds all resources where a service account has IAM permissions.
+// This uses the Cloud Asset Inventory API to search across all resources.
+func GetServiceAccountUsage(ctx context.Context, projectID, accountEmail string) ([]*UsageInfo, error) {
+	// TODO: Implement using Cloud Asset Inventory API
+	// For now, return a placeholder implementation that checks common resource types
+
+	var usage []*UsageInfo
+
+	// This is a simplified implementation. A full implementation would use:
+	// - cloudasset.googleapis.com/v1 API
+	// - SearchAllIamPolicies method
+	// - Filter by the service account email
+
+	// For now, we'll return an empty list with a note
+	// Users can implement this by enabling Cloud Asset Inventory API
+
+	return usage, nil
+}

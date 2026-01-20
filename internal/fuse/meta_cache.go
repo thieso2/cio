@@ -26,6 +26,9 @@ const (
 	// ListCacheTTL is for list operations (buckets, tables, objects) which change more often
 	ListCacheTTL = 30 * time.Minute
 
+	// IAMPolicyCacheTTL is for IAM policies and access entries which change moderately
+	IAMPolicyCacheTTL = 1 * time.Hour
+
 	// NegativeCacheTTL is for caching "not found" errors to avoid repeated API calls
 	NegativeCacheTTL = 5 * time.Minute
 
@@ -331,4 +334,16 @@ func (c *MetadataCache) InvalidateDataset(projectID, datasetID string) {
 			os.Remove(match)
 		}
 	}
+}
+
+// GetBucketIAMPolicy caches GCS bucket IAM policy
+func (c *MetadataCache) GetBucketIAMPolicy(ctx context.Context, bucketName string, generator func() ([]byte, error)) ([]byte, error) {
+	cacheKey := fmt.Sprintf("gcs:iam:bucket:%s", bucketName)
+	return c.GetWithTTL(ctx, cacheKey, IAMPolicyCacheTTL, generator)
+}
+
+// GetDatasetIAMPolicy caches BigQuery dataset access entries
+func (c *MetadataCache) GetDatasetIAMPolicy(ctx context.Context, projectID, datasetID string, generator func() ([]byte, error)) ([]byte, error) {
+	cacheKey := fmt.Sprintf("bq:iam:dataset:%s.%s", projectID, datasetID)
+	return c.GetWithTTL(ctx, cacheKey, IAMPolicyCacheTTL, generator)
 }

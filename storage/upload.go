@@ -6,10 +6,24 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 
 	"cloud.google.com/go/storage"
 	"github.com/thieso2/cio/resolver"
 )
+
+const (
+	// DefaultConcurrentUploads is the default number of concurrent upload operations
+	DefaultConcurrentUploads = 50
+)
+
+// fileUpload represents a file to be uploaded
+type fileUpload struct {
+	localPath   string
+	objectPath  string
+	fullGCSPath string
+}
 
 // PathFormatter is a function that formats GCS paths for display
 // It can convert gs:// paths to alias paths for better readability
@@ -77,7 +91,7 @@ func UploadFile(ctx context.Context, client *storage.Client, localPath, gcsPath 
 }
 
 // UploadDirectory uploads a directory recursively to GCS
-func UploadDirectory(ctx context.Context, client *storage.Client, localPath, gcsPath string, verbose bool, formatter PathFormatter) error {
+func UploadDirectory(ctx context.Context, client *storage.Client, localPath, gcsPath string, verbose bool, formatter PathFormatter, maxWorkers int) error {
 	if formatter == nil {
 		formatter = DefaultPathFormatter
 	}
@@ -96,8 +110,9 @@ func UploadDirectory(ctx context.Context, client *storage.Client, localPath, gcs
 	// Get the directory name
 	dirName := filepath.Base(localPath)
 
-	// Walk through the directory
-	uploadCount := 0
+	// First pass: count total files
+	var filesToUpload []fileUpload
+
 	err = filepath.Walk(localPath, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -119,36 +134,11 @@ func UploadDirectory(ctx context.Context, client *storage.Client, localPath, gcs
 		objectPath := basePrefix + dirName + "/" + relPath
 		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, objectPath)
 
-		if verbose {
-			fmt.Printf("Uploading %s to %s\n", path, formatter(fullGCSPath))
-		}
-
-		// Open local file
-		file, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("failed to open %s: %w", path, err)
-		}
-		defer file.Close()
-
-		// Create GCS object writer
-		obj := client.Bucket(bucket).Object(objectPath)
-		writer := obj.NewWriter(ctx)
-
-		// Copy file contents
-		if _, err := io.Copy(writer, file); err != nil {
-			writer.Close()
-			return fmt.Errorf("failed to upload %s: %w", path, err)
-		}
-
-		// Close writer
-		if err := writer.Close(); err != nil {
-			return fmt.Errorf("failed to close writer for %s: %w", path, err)
-		}
-
-		uploadCount++
-		if !verbose {
-			fmt.Printf("Uploaded: %s → %s\n", path, formatter(fullGCSPath))
-		}
+		filesToUpload = append(filesToUpload, fileUpload{
+			localPath:   path,
+			objectPath:  objectPath,
+			fullGCSPath: fullGCSPath,
+		})
 
 		return nil
 	})
@@ -157,6 +147,110 @@ func UploadDirectory(ctx context.Context, client *storage.Client, localPath, gcs
 		return err
 	}
 
-	fmt.Printf("\nTotal files uploaded: %d\n", uploadCount)
+	totalCount := len(filesToUpload)
+
+	// Second pass: upload in parallel with progress counter
+	return uploadFilesParallel(ctx, client, bucket, filesToUpload, totalCount, verbose, formatter, maxWorkers)
+}
+
+// uploadFilesParallel uploads files in parallel with controlled concurrency
+func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket string, filesToUpload []fileUpload, totalCount int, verbose bool, formatter PathFormatter, maxWorkers int) error {
+	// Create a semaphore to limit concurrent uploads
+	sem := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	var completedCount int32
+
+	// Channel for completed uploads (for progress tracking)
+	type upload struct {
+		localPath   string
+		fullGCSPath string
+		err         error
+	}
+	uploads := make(chan upload, totalCount)
+
+	// Start progress reporter goroutine
+	done := make(chan struct{})
+	go func() {
+		for u := range uploads {
+			count := atomic.AddInt32(&completedCount, 1)
+
+			if u.err != nil {
+				fmt.Printf("Failed %d/%d: %s - %v\n", count, totalCount, u.localPath, u.err)
+
+				// Store first error
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = u.err
+				}
+				mu.Unlock()
+			} else {
+				if verbose {
+					fmt.Printf("Uploaded %d/%d: %s to %s\n", count, totalCount, u.localPath, formatter(u.fullGCSPath))
+				} else {
+					fmt.Printf("Uploaded %d/%d: %s → %s\n", count, totalCount, u.localPath, formatter(u.fullGCSPath))
+				}
+			}
+		}
+		close(done)
+	}()
+
+	// Upload files in parallel
+	bkt := client.Bucket(bucket)
+	for _, fu := range filesToUpload {
+		wg.Add(1)
+
+		// Acquire semaphore
+		sem <- struct{}{}
+
+		go func(fileUpload fileUpload) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
+
+			// Open local file
+			file, err := os.Open(fileUpload.localPath)
+			if err != nil {
+				uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: err}
+				return
+			}
+			defer file.Close()
+
+			// Create GCS object writer
+			obj := bkt.Object(fileUpload.objectPath)
+			writer := obj.NewWriter(ctx)
+
+			// Copy file contents
+			if _, err := io.Copy(writer, file); err != nil {
+				writer.Close()
+				uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: err}
+				return
+			}
+
+			// Close writer
+			if err := writer.Close(); err != nil {
+				uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: err}
+				return
+			}
+
+			// Send result to progress reporter
+			uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: nil}
+		}(fu)
+	}
+
+	// Wait for all uploads to complete
+	wg.Wait()
+	close(uploads)
+
+	// Wait for progress reporter to finish
+	<-done
+
+	if firstErr != nil {
+		return fmt.Errorf("upload failed: %w", firstErr)
+	}
+
+	if totalCount > 1 {
+		fmt.Printf("\nTotal files uploaded: %d\n", totalCount)
+	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -489,7 +490,8 @@ func (n *BQMetaDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, syscal
 	}
 
 	entries := []fuse.DirEntry{
-		{Name: "_dataset.json", Mode: fuse.S_IFREG}, // Dataset metadata
+		{Name: "metadata.json", Mode: fuse.S_IFREG}, // Dataset metadata
+		{Name: "iam-policy", Mode: fuse.S_IFDIR},    // IAM policy directory
 	}
 
 	for _, tableID := range tableIDs {
@@ -518,7 +520,29 @@ func (n *BQMetaDirectoryNode) Lookup(ctx context.Context, name string, out *fuse
 		return nil, syscall.ENOENT
 	}
 
-	// For now, return ENOENT for metadata files
-	// This can be implemented later if needed
+	// Handle IAM policy directory
+	if name == "iam-policy" {
+		stable := fs.StableAttr{Mode: fuse.S_IFDIR}
+		child := n.NewInode(ctx, &BQIAMPolicyDirectoryNode{
+			projectID: n.projectID,
+			datasetID: n.datasetID,
+		}, stable)
+		return child, 0
+	}
+
+	// Handle dataset metadata file
+	if name == "metadata.json" {
+		// TODO: Implement dataset metadata file
+		// For now, return ENOENT
+		return nil, syscall.ENOENT
+	}
+
+	// Handle table metadata files (table_name.json)
+	if strings.HasSuffix(name, ".json") {
+		// TODO: Implement table metadata files
+		// For now, return ENOENT
+		return nil, syscall.ENOENT
+	}
+
 	return nil, syscall.ENOENT
 }

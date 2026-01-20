@@ -159,9 +159,10 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 
 		// Execute removal
 		options := &resource.RemoveOptions{
-			Recursive: rmRecursive,
-			Force:     rmForce,
-			Verbose:   verbose,
+			Recursive:   rmRecursive,
+			Force:       rmForce,
+			Verbose:     verbose,
+			Parallelism: GetParallelism(),
 		}
 
 		return res.Remove(ctx, fullPath, options)

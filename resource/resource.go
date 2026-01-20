@@ -44,9 +44,10 @@ type ListOptions struct {
 
 // RemoveOptions contains options for removing resources
 type RemoveOptions struct {
-	Recursive bool
-	Force     bool
-	Verbose   bool
+	Recursive   bool
+	Force       bool
+	Verbose     bool
+	Parallelism int // Number of parallel operations (for GCS only)
 }
 
 // PathComponents represents parsed path components

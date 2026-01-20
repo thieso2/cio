@@ -16,6 +16,10 @@ defaults:
   # Project ID - can use environment variables with ${VAR_NAME} syntax
   project_id: ${PROJECT_ID}
 
+  # Number of concurrent operations for cp/rm commands (1-200, default: 50)
+  # Higher values speed up operations on large numbers of files but use more resources
+  parallelism: 50
+
 # Web server configuration (for Phase 4)
 server:
   # Port for web server
