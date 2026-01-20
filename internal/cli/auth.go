@@ -6,15 +6,16 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/idtoken"
 	"google.golang.org/api/option"
 )
 
 var (
-	authCredentials string
-	authAudience    string
+	authCredentials           string
+	authAudience              string
+	authImpersonateServiceAccount string
 )
 
 // authCmd represents the auth command
@@ -30,10 +31,12 @@ Examples:
   # Print access token using service account
   cio auth print-access-token -c /path/to/service-account.json
 
-  # Print identity token for a specific audience
-  cio auth print-identity-token -a https://example-service.run.app
+  # Print identity token with impersonation (user credentials)
+  cio auth print-identity-token \
+    -a https://example-service.run.app \
+    --impersonate-service-account=my-sa@project.iam.gserviceaccount.com
 
-  # Print identity token using service account
+  # Print identity token using service account file
   cio auth print-identity-token -a https://example.com -c /path/to/sa.json`,
 }
 
@@ -106,17 +109,19 @@ with services that require identity tokens (e.g., Cloud Run, Cloud Functions).
 
 The -a/--audience flag is REQUIRED and specifies the target audience URL.
 
-By default, it uses Application Default Credentials (ADC). You can override
-this by providing a service account JSON file with the -c flag.
+For user credentials (from 'gcloud auth application-default login'), you must
+specify a service account to impersonate using --impersonate-service-account.
 
 Examples:
-  # Using ADC with Cloud Run service
-  cio auth print-identity-token -a https://my-service-abc123.run.app
-
-  # Using service account
+  # Using service account file
   cio auth print-identity-token \
     -a https://my-service.run.app \
     -c /path/to/service-account.json
+
+  # Using user credentials with impersonation
+  cio auth print-identity-token \
+    -a https://my-service.run.app \
+    --impersonate-service-account=my-sa@project.iam.gserviceaccount.com
 
   # Use in curl command
   curl -H "Authorization: Bearer $(cio auth print-identity-token -a https://my-service.run.app)" \
@@ -128,49 +133,97 @@ Examples:
 
 		ctx := context.Background()
 
-		var ts oauth2.TokenSource
-		var err error
-
+		// Case 1: Service account credentials file provided
 		if authCredentials != "" {
-			// Use service account credentials
-			ts, err = idtoken.NewTokenSource(ctx, authAudience, option.WithCredentialsFile(authCredentials))
-		} else {
-			// Use ADC
-			ts, err = idtoken.NewTokenSource(ctx, authAudience)
+			ts, err := idtoken.NewTokenSource(ctx, authAudience, option.WithCredentialsFile(authCredentials))
+			if err != nil {
+				return fmt.Errorf("failed to create token source: %w", err)
+			}
+
+			token, err := ts.Token()
+			if err != nil {
+				return fmt.Errorf("failed to get identity token: %w", err)
+			}
+
+			fmt.Println(token.AccessToken)
+			return nil
 		}
 
+		// Case 2: User credentials with impersonation
+		if authImpersonateServiceAccount != "" {
+			token, err := generateIdentityTokenWithImpersonation(ctx, authImpersonateServiceAccount, authAudience)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(token)
+			return nil
+		}
+
+		// Case 3: Try standard ADC (works for some credential types)
+		ts, err := idtoken.NewTokenSource(ctx, authAudience)
 		if err != nil {
 			// Check if this is the unsupported credentials type error
 			errMsg := err.Error()
 			if errMsg == "idtoken: unsupported credentials type" {
-				return fmt.Errorf(`identity tokens are not supported with user credentials
+				return fmt.Errorf(`identity tokens require service account credentials or impersonation
 
 User credentials from 'gcloud auth application-default login' cannot generate
-identity tokens. Identity tokens require service account credentials.
+identity tokens directly. You must use one of these options:
 
-Solutions:
   1. Use a service account JSON file:
      cio auth print-identity-token -a %s -c /path/to/service-account.json
 
-  2. Use service account impersonation with gcloud:
-     gcloud auth application-default login --impersonate-service-account=SA_EMAIL
+  2. Use service account impersonation (recommended):
+     cio auth print-identity-token -a %s \
+       --impersonate-service-account=my-sa@project.iam.gserviceaccount.com
 
-  3. Use gcloud directly (supports user credentials):
-     gcloud auth print-identity-token --audiences=%s`, authAudience, authAudience)
+  3. Use gcloud directly:
+     gcloud auth print-identity-token --audiences=%s
+
+Note: For option 2, you need the 'Service Account Token Creator' role on the
+service account you want to impersonate.`, authAudience, authAudience, authAudience)
 			}
 			return fmt.Errorf("failed to create token source: %w", err)
 		}
 
-		// Get token
 		token, err := ts.Token()
 		if err != nil {
 			return fmt.Errorf("failed to get identity token: %w", err)
 		}
 
-		// Print token
 		fmt.Println(token.AccessToken)
 		return nil
 	},
+}
+
+// generateIdentityTokenWithImpersonation generates an identity token by impersonating a service account.
+func generateIdentityTokenWithImpersonation(ctx context.Context, serviceAccount, audience string) (string, error) {
+	// Get credentials for IAM API (uses ADC)
+	creds, err := google.FindDefaultCredentials(ctx, iamcredentials.CloudPlatformScope)
+	if err != nil {
+		return "", fmt.Errorf("failed to get credentials: %w", err)
+	}
+
+	// Create IAM Credentials service
+	iamService, err := iamcredentials.NewService(ctx, option.WithTokenSource(creds.TokenSource))
+	if err != nil {
+		return "", fmt.Errorf("failed to create IAM service: %w", err)
+	}
+
+	// Generate identity token
+	name := fmt.Sprintf("projects/-/serviceAccounts/%s", serviceAccount)
+	req := &iamcredentials.GenerateIdTokenRequest{
+		Audience:     audience,
+		IncludeEmail: true,
+	}
+
+	resp, err := iamService.Projects.ServiceAccounts.GenerateIdToken(name, req).Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate identity token: %w\n\nMake sure you have the 'Service Account Token Creator' role (roles/iam.serviceAccountTokenCreator)\non service account: %s", err, serviceAccount)
+	}
+
+	return resp.Token, nil
 }
 
 func init() {
@@ -179,6 +232,7 @@ func init() {
 
 	// Add print-identity-token flags
 	printIdentityTokenCmd.Flags().StringVarP(&authAudience, "audience", "a", "", "Target audience URL (e.g., https://example-service.run.app)")
+	printIdentityTokenCmd.Flags().StringVar(&authImpersonateServiceAccount, "impersonate-service-account", "", "Service account to impersonate (e.g., my-sa@project.iam.gserviceaccount.com)")
 
 	// Add subcommands
 	authCmd.AddCommand(printAccessTokenCmd)

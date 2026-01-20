@@ -475,24 +475,31 @@ Similar to `gcloud auth print-access-token`.
 Print an OpenID Connect (OIDC) identity token for authenticating with services that require identity tokens (e.g., Cloud Run, Cloud Functions).
 
 ```bash
-# Using ADC with Cloud Run service (audience required)
-cio auth print-identity-token -a https://my-service-abc123.run.app
+# Using user credentials with service account impersonation (recommended)
+cio auth print-identity-token \
+  -a https://my-service-abc123.run.app \
+  --impersonate-service-account=my-sa@project.iam.gserviceaccount.com
 
-# Using service account
+# Using service account JSON file
 cio auth print-identity-token \
   -a https://my-service.run.app \
   -c /path/to/service-account.json
 
 # Use in curl command to call Cloud Run
-curl -H "Authorization: Bearer $(cio auth print-identity-token -a https://my-service.run.app)" \
+curl -H "Authorization: Bearer $(cio auth print-identity-token -a https://my-service.run.app --impersonate-service-account=my-sa@project.iam.gserviceaccount.com)" \
   https://my-service-abc123.run.app
 ```
 
 **Flags:**
 - `-a, --audience` - Target audience URL (required)
+- `--impersonate-service-account` - Service account to impersonate (for user credentials)
 - `-c, --credentials` - Path to service account JSON file
 
-Similar to `gcloud auth print-identity-token`.
+**Note:** User credentials from `gcloud auth application-default login` cannot generate identity tokens directly. You must either:
+- Use service account impersonation (requires `roles/iam.serviceAccountTokenCreator` role)
+- Use a service account JSON file with `-c`
+
+Similar to `gcloud auth print-identity-token --impersonate-service-account`.
 
 ### Listing Objects
 
@@ -582,12 +589,14 @@ cio ls -r am
 ```bash
 gcloud auth print-access-token
 gcloud auth print-identity-token --audiences=https://my-service.run.app
+gcloud auth print-identity-token --impersonate-service-account=my-sa@project.iam.gserviceaccount.com --audiences=https://my-service.run.app
 ```
 
 **After (cio):**
 ```bash
 cio auth print-access-token
-cio auth print-identity-token -a https://my-service.run.app
+cio auth print-identity-token -a https://my-service.run.app \
+  --impersonate-service-account=my-sa@project.iam.gserviceaccount.com
 ```
 
 ## Architecture
