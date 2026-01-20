@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/thieso2/cio/internal/resolver"
-	"github.com/thieso2/cio/internal/resource"
+	"github.com/thieso2/cio/resolver"
+	"github.com/thieso2/cio/resource"
 )
 
 var (

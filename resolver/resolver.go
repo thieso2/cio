@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/thieso2/cio/internal/config"
+	"github.com/thieso2/cio/config"
 )
 
 // Resolver handles alias-to-path resolution

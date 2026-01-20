@@ -2,6 +2,8 @@
 
 A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gcloud storage` and `bq` commands with short aliases. Also provides an **experimental** FUSE filesystem for browsing Google Cloud resources (⚠️ alpha quality, AI-generated).
 
+**Can also be used as a Go library** - see [LIBRARY.md](LIBRARY.md) for details.
+
 ## Features
 
 - **Alias Mappings**: Map short aliases to full GCS bucket paths and BigQuery datasets
@@ -12,8 +14,11 @@ A fast CLI tool for Google Cloud Storage and BigQuery that replaces common `gclo
 - **Fast**: Built in Go with metadata caching for speed and efficiency
 - **Simple Configuration**: YAML-based configuration with environment variable support
 - **ADC Authentication**: Uses Google Application Default Credentials
+- **Go Library**: Use cio as a library in your Go projects for programmatic GCP access
 
 ## Installation
+
+### As a CLI Tool
 
 ### Download Pre-built Binaries
 
@@ -55,7 +60,46 @@ mise build   # or: make build
 mise install # or: make install
 ```
 
-## Quick Start
+### As a Go Library
+
+```bash
+go get github.com/thieso2/cio
+```
+
+See [LIBRARY.md](LIBRARY.md) for complete library documentation and examples.
+
+**Quick Example:**
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/thieso2/cio/client"
+)
+
+func main() {
+	c, err := client.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+
+	// List GCS objects
+	objects, err := c.Storage().List(context.Background(), "gs://bucket/prefix/")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, obj := range objects {
+		fmt.Printf("%s (%d bytes)\n", obj.Name, obj.Size)
+	}
+}
+```
+
+## Quick Start (CLI)
 
 ### 1. Check Version
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/thieso2/cio/internal/resolver"
-	"github.com/thieso2/cio/internal/storage"
+	"github.com/thieso2/cio/resolver"
+	"github.com/thieso2/cio/storage"
 )
 
 // GCSResource implements the Resource interface for Google Cloud Storage

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"cloud.google.com/go/storage"
-	"github.com/thieso2/cio/internal/resolver"
+	"github.com/thieso2/cio/resolver"
 )
 
 // PathFormatter is a function that formats GCS paths for display

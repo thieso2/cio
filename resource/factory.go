@@ -3,7 +3,7 @@ package resource
 import (
 	"fmt"
 
-	"github.com/thieso2/cio/internal/resolver"
+	"github.com/thieso2/cio/resolver"
 )
 
 // Factory creates Resource instances based on path type

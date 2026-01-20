@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/thieso2/cio/internal/bigquery"
-	"github.com/thieso2/cio/internal/config"
-	"github.com/thieso2/cio/internal/resolver"
+	"github.com/thieso2/cio/bigquery"
+	"github.com/thieso2/cio/config"
+	"github.com/thieso2/cio/resolver"
 )
 
 var (

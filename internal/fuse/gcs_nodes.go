@@ -11,7 +11,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	storagepkg "github.com/thieso2/cio/internal/storage"
+	storagepkg "github.com/thieso2/cio/storage"
 	"google.golang.org/api/iterator"
 )
 

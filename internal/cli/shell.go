@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/thieso2/cio/internal/bigquery"
-	"github.com/thieso2/cio/internal/config"
+	"github.com/thieso2/cio/bigquery"
+	"github.com/thieso2/cio/config"
 )
 
 const (

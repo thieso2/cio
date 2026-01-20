@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/thieso2/cio/internal/bigquery"
-	"github.com/thieso2/cio/internal/resolver"
+	"github.com/thieso2/cio/bigquery"
+	"github.com/thieso2/cio/resolver"
 )
 
 // BigQueryResource implements the Resource interface for BigQuery

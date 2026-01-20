@@ -11,7 +11,7 @@ import (
 	cloud_bigquery "cloud.google.com/go/bigquery"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/thieso2/cio/internal/bigquery"
+	"github.com/thieso2/cio/bigquery"
 )
 
 // listBQDatasets lists all datasets in a project and returns a DirStream

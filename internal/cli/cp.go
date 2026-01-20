@@ -7,8 +7,8 @@ import (
 
 	gcs "cloud.google.com/go/storage"
 	"github.com/spf13/cobra"
-	"github.com/thieso2/cio/internal/resolver"
-	"github.com/thieso2/cio/internal/storage"
+	"github.com/thieso2/cio/resolver"
+	"github.com/thieso2/cio/storage"
 )
 
 var (
