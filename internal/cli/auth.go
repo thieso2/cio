@@ -140,6 +140,24 @@ Examples:
 		}
 
 		if err != nil {
+			// Check if this is the unsupported credentials type error
+			errMsg := err.Error()
+			if errMsg == "idtoken: unsupported credentials type" {
+				return fmt.Errorf(`identity tokens are not supported with user credentials
+
+User credentials from 'gcloud auth application-default login' cannot generate
+identity tokens. Identity tokens require service account credentials.
+
+Solutions:
+  1. Use a service account JSON file:
+     cio auth print-identity-token -a %s -c /path/to/service-account.json
+
+  2. Use service account impersonation with gcloud:
+     gcloud auth application-default login --impersonate-service-account=SA_EMAIL
+
+  3. Use gcloud directly (supports user credentials):
+     gcloud auth print-identity-token --audiences=%s`, authAudience, authAudience)
+			}
 			return fmt.Errorf("failed to create token source: %w", err)
 		}
 

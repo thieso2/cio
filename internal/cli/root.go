@@ -45,9 +45,11 @@ func SetVersionInfo(version, commit, date, builtBy string) {
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "cio",
-	Short:   "Cloud IO - A fast CLI for Google Cloud Storage and BigQuery",
-	Version: versionInfo.Version,
+	Use:           "cio",
+	Short:         "Cloud IO - A fast CLI for Google Cloud Storage and BigQuery",
+	Version:       versionInfo.Version,
+	SilenceUsage:  true, // Don't show usage on errors
+	SilenceErrors: true, // Don't print errors (main.go handles this)
 	Long: `cio (Cloud IO) is a CLI tool that replaces common gcloud storage and bq commands
 with short aliases and provides a FUSE filesystem for browsing Google Cloud resources.
 
