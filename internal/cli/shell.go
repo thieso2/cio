@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chzyer/readline"
+	"github.com/peterh/liner"
 	"github.com/thieso2/cio/bigquery"
 	"github.com/thieso2/cio/config"
 )
@@ -33,22 +33,40 @@ func runInteractiveShell(ctx context.Context, cfg *config.Config) error {
 		historyFile = ""
 	}
 
-	// Create completer
-	completer := createCompleter()
+	// Create liner instance
+	line := liner.NewLiner()
+	defer line.Close()
 
-	// Setup readline
-	rl, err := readline.NewEx(&readline.Config{
-		Prompt:            shellPrompt,
-		HistoryFile:       historyFile,
-		AutoComplete:      completer,
-		InterruptPrompt:   "^C",
-		EOFPrompt:         "exit",
-		HistorySearchFold: true,
+	// Enable multiline mode
+	line.SetMultiLineMode(true)
+
+	// Enable Ctrl+C handling
+	line.SetCtrlCAborts(true)
+
+	// Setup tab completion
+	line.SetCompleter(func(lineText string) (c []string) {
+		// Simple SQL keyword completion
+		keywords := []string{
+			"SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
+			"ON", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "AS",
+			"AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL",
+			"COUNT", "SUM", "AVG", "MIN", "MAX", "DISTINCT", "ASC", "DESC",
+		}
+		for _, keyword := range keywords {
+			if strings.HasPrefix(strings.ToUpper(lineText), strings.ToUpper(keyword)[:min(len(lineText), len(keyword))]) {
+				c = append(c, keyword)
+			}
+		}
+		return
 	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize shell: %w", err)
+
+	// Load history if file exists
+	if historyFile != "" {
+		if f, err := os.Open(historyFile); err == nil {
+			line.ReadHistory(f)
+			f.Close()
+		}
 	}
-	defer rl.Close()
 
 	// Print welcome message
 	fmt.Println("BigQuery SQL Shell (cio)")
@@ -58,17 +76,17 @@ func runInteractiveShell(ctx context.Context, cfg *config.Config) error {
 	// REPL loop
 	var multilineSQL strings.Builder
 	multilineMode := false
+	prompt := shellPrompt
 
 	for {
-		line, err := rl.Readline()
+		input, err := line.Prompt(prompt)
 		if err != nil {
-			// EOF or error
-			if err == readline.ErrInterrupt {
+			if err == liner.ErrPromptAborted {
 				if multilineMode {
 					// Cancel multiline input
 					multilineSQL.Reset()
 					multilineMode = false
-					rl.SetPrompt(shellPrompt)
+					prompt = shellPrompt
 					continue
 				} else {
 					// Exit on Ctrl+C when not in multiline mode
@@ -80,43 +98,46 @@ func runInteractiveShell(ctx context.Context, cfg *config.Config) error {
 			break
 		}
 
-		line = strings.TrimSpace(line)
+		input = strings.TrimSpace(input)
 
 		// Skip empty lines
-		if line == "" {
+		if input == "" {
 			continue
 		}
 
 		// Check for exit commands
-		if !multilineMode && (line == "exit" || line == "quit" || line == "\\q") {
+		if !multilineMode && (input == "exit" || input == "quit" || input == "\\q") {
 			break
 		}
 
 		// Check for help
-		if !multilineMode && line == "help" {
+		if !multilineMode && input == "help" {
 			printShellHelp()
 			continue
 		}
 
 		// Check for meta-commands (when not in multiline mode)
-		if !multilineMode && strings.HasPrefix(line, "\\") {
-			if err := handleMetaCommand(ctx, cfg, projectID, line); err != nil {
+		if !multilineMode && strings.HasPrefix(input, "\\") {
+			if err := handleMetaCommand(ctx, cfg, projectID, input); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
 			continue
 		}
 
 		// Handle SQL (possibly multiline)
-		multilineSQL.WriteString(line)
+		multilineSQL.WriteString(input)
 		multilineSQL.WriteString(" ")
 
 		// Check if statement is complete (ends with ;)
-		if strings.HasSuffix(line, ";") {
+		if strings.HasSuffix(input, ";") {
 			// Remove trailing semicolon
 			sql := strings.TrimSpace(strings.TrimSuffix(multilineSQL.String(), ";"))
 			multilineSQL.Reset()
 			multilineMode = false
-			rl.SetPrompt(shellPrompt)
+			prompt = shellPrompt
+
+			// Add to history
+			line.AppendHistory(sql)
 
 			// Execute the query
 			if err := executeShellQuery(ctx, cfg, projectID, sql); err != nil {
@@ -126,12 +147,28 @@ func runInteractiveShell(ctx context.Context, cfg *config.Config) error {
 		} else {
 			// Continue multiline input
 			multilineMode = true
-			rl.SetPrompt(continuedPrompt)
+			prompt = continuedPrompt
+		}
+	}
+
+	// Save history
+	if historyFile != "" {
+		if f, err := os.Create(historyFile); err == nil {
+			line.WriteHistory(f)
+			f.Close()
 		}
 	}
 
 	fmt.Println("\nGoodbye!")
 	return nil
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // executeShellQuery executes a query in the shell context
@@ -273,64 +310,6 @@ func printShellHelp() {
 	fmt.Println()
 }
 
-// createCompleter creates an autocompleter for SQL keywords
-func createCompleter() *readline.PrefixCompleter {
-	return readline.NewPrefixCompleter(
-		// SQL keywords
-		readline.PcItem("SELECT"),
-		readline.PcItem("FROM"),
-		readline.PcItem("WHERE"),
-		readline.PcItem("JOIN"),
-		readline.PcItem("LEFT"),
-		readline.PcItem("RIGHT"),
-		readline.PcItem("INNER"),
-		readline.PcItem("OUTER"),
-		readline.PcItem("ON"),
-		readline.PcItem("GROUP"),
-		readline.PcItem("ORDER"),
-		readline.PcItem("BY"),
-		readline.PcItem("HAVING"),
-		readline.PcItem("LIMIT"),
-		readline.PcItem("OFFSET"),
-		readline.PcItem("AS"),
-		readline.PcItem("AND"),
-		readline.PcItem("OR"),
-		readline.PcItem("NOT"),
-		readline.PcItem("IN"),
-		readline.PcItem("EXISTS"),
-		readline.PcItem("BETWEEN"),
-		readline.PcItem("LIKE"),
-		readline.PcItem("IS"),
-		readline.PcItem("NULL"),
-		readline.PcItem("COUNT"),
-		readline.PcItem("SUM"),
-		readline.PcItem("AVG"),
-		readline.PcItem("MIN"),
-		readline.PcItem("MAX"),
-		readline.PcItem("DISTINCT"),
-		readline.PcItem("ASC"),
-		readline.PcItem("DESC"),
-		readline.PcItem("INSERT"),
-		readline.PcItem("UPDATE"),
-		readline.PcItem("DELETE"),
-		readline.PcItem("CREATE"),
-		readline.PcItem("DROP"),
-		readline.PcItem("ALTER"),
-		readline.PcItem("TABLE"),
-		readline.PcItem("VIEW"),
-		readline.PcItem("INDEX"),
-
-		// Meta-commands
-		readline.PcItem("\\d"),
-		readline.PcItem("\\l"),
-		readline.PcItem("\\q"),
-
-		// Shell commands
-		readline.PcItem("help"),
-		readline.PcItem("exit"),
-		readline.PcItem("quit"),
-	)
-}
 
 // getHistoryFilePath returns the path to the history file
 func getHistoryFilePath() (string, error) {
