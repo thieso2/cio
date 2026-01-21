@@ -90,8 +90,17 @@ func (b *BigQueryResource) List(ctx context.Context, path string, options *ListO
 	// Convert to ResourceInfo
 	result := make([]*ResourceInfo, len(bqObjects))
 	for i, obj := range bqObjects {
+		// Extract name from path (last component after final dot or slash)
+		name := obj.Path
+		if idx := strings.LastIndex(name, "."); idx != -1 {
+			name = name[idx+1:]
+		} else if idx := strings.LastIndex(name, "/"); idx != -1 {
+			name = name[idx+1:]
+		}
+
 		result[i] = &ResourceInfo{
 			Path:        obj.Path,
+			Name:        name,
 			Type:        obj.Type,
 			Size:        obj.SizeBytes,
 			Rows:        obj.NumRows,

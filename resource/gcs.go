@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/thieso2/cio/resolver"
 	"github.com/thieso2/cio/storage"
@@ -97,15 +98,33 @@ func (g *GCSResource) List(ctx context.Context, path string, options *ListOption
 	result := make([]*ResourceInfo, len(objects))
 	for i, obj := range objects {
 		objType := "file"
-		if obj.IsPrefix {
+		isDir := obj.IsPrefix
+		if isDir {
 			objType = "directory"
 		}
+
+		// Extract name from path (last component after gs://bucket/)
+		name := obj.Path
+		if strings.HasPrefix(name, "gs://") {
+			// Remove gs://bucket/ prefix
+			if idx := strings.Index(name[5:], "/"); idx != -1 {
+				name = name[5+idx+1:]
+			}
+			// Remove trailing slash for directories
+			name = strings.TrimSuffix(name, "/")
+			// Get just the last component
+			if idx := strings.LastIndex(name, "/"); idx != -1 {
+				name = name[idx+1:]
+			}
+		}
+
 		result[i] = &ResourceInfo{
 			Path:     obj.Path,
-			Name:     obj.Path, // Use path as name for GCS
+			Name:     name,
 			Type:     objType,
 			Size:     obj.Size,
 			Modified: obj.Updated,
+			IsDir:    isDir,
 			Details:  obj,
 		}
 	}
