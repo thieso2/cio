@@ -4,10 +4,12 @@ go 1.25.6
 
 require (
 	cloud.google.com/go/bigquery v1.72.0
+	cloud.google.com/go/iam v1.5.3
 	cloud.google.com/go/storage v1.59.1
-	github.com/chzyer/readline v1.5.1
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/olekukonko/tablewriter v1.1.3
+	github.com/peterh/liner v1.2.2
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/sync v0.19.0
@@ -21,7 +23,6 @@ require (
 	cloud.google.com/go/auth v0.17.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/monitoring v1.24.2 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.29.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.54.0 // indirect
