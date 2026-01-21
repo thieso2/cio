@@ -10,6 +10,99 @@ The project uses [GoReleaser](https://goreleaser.com/) for automated builds and 
 2. Creates a GitHub release with changelog
 3. Uploads all binaries and checksums
 
+### Automated Release Workflow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Git as Git Repository
+    participant GH as GitHub Actions
+    participant GR as GoReleaser
+    participant Build as Build System
+    participant Release as GitHub Releases
+
+    Dev->>Dev: Run mise release
+    Dev->>Dev: Validate version format
+    Dev->>Dev: Check uncommitted changes
+    Dev->>Dev: Run tests
+    Dev->>Git: git tag -a v1.0.0
+    Dev->>Git: git push origin v1.0.0
+
+    Git->>GH: Trigger on tag push
+    GH->>GH: Checkout code
+    GH->>GH: Setup Go environment
+    GH->>GR: Run GoReleaser
+
+    GR->>Build: Build Linux amd64
+    GR->>Build: Build Linux arm64
+    GR->>Build: Build macOS amd64
+    GR->>Build: Build macOS arm64
+
+    Build-->>GR: Binaries
+
+    GR->>GR: Generate checksums
+    GR->>GR: Generate changelog
+    GR->>GR: Create archives
+
+    GR->>Release: Create GitHub release
+    GR->>Release: Upload binaries
+    GR->>Release: Upload checksums
+    GR->>Release: Publish release
+
+    Release-->>Dev: Release published notification
+```
+
+### Release Process Flow
+
+```mermaid
+flowchart TB
+    Start["Developer ready<br/>to release"]
+    Check1{"All changes<br/>committed?"}
+    Check2{"Tests pass?"}
+    Check3{"Version format<br/>valid?"}
+    Confirm{"Confirm<br/>release?"}
+
+    CreateTag["Create version tag<br/>(git tag -a v1.0.0)"]
+    PushTag["Push tag to GitHub<br/>(git push origin v1.0.0)"]
+
+    GHAction["GitHub Actions<br/>triggered"]
+    Build["Build for all platforms<br/>(Linux, macOS)"]
+    Package["Package binaries<br/>+ checksums"]
+    Changelog["Generate changelog<br/>from commits"]
+    CreateRelease["Create GitHub release"]
+    Upload["Upload artifacts"]
+    Publish["Publish release"]
+
+    Notify["Notify developer"]
+
+    Start --> Check1
+    Check1 -->|No| Fix1["Commit changes"]
+    Fix1 --> Check1
+    Check1 -->|Yes| Check2
+
+    Check2 -->|No| Fix2["Fix tests"]
+    Fix2 --> Check2
+    Check2 -->|Yes| Check3
+
+    Check3 -->|No| Fix3["Fix version format<br/>(vX.Y.Z)"]
+    Fix3 --> Check3
+    Check3 -->|Yes| Confirm
+
+    Confirm -->|No| Cancel["Cancel release"]
+    Confirm -->|Yes| CreateTag
+
+    CreateTag --> PushTag
+    PushTag --> GHAction
+
+    GHAction --> Build
+    Build --> Package
+    Package --> Changelog
+    Changelog --> CreateRelease
+    CreateRelease --> Upload
+    Upload --> Publish
+    Publish --> Notify
+```
+
 ## Supported Platforms
 
 - **Linux**: amd64, arm64

@@ -2,10 +2,176 @@
 
 The `cio` project can be used as a library in your Go applications to interact with Google Cloud Storage and BigQuery.
 
+## Package Architecture
+
+### High-Level Overview
+
+```mermaid
+graph TB
+    App["Your Go Application"]
+    Client["client Package<br/>(Unified API)"]
+
+    subgraph "Core Packages"
+        Config["config Package<br/>(YAML, env vars)"]
+        Resolver["resolver Package<br/>(Alias resolution)"]
+        Resource["resource Package<br/>(Abstraction layer)"]
+    end
+
+    subgraph "Service Packages"
+        Storage["storage Package<br/>(GCS operations)"]
+        BQ["bigquery Package<br/>(BQ operations)"]
+        IAM["iam Package<br/>(IAM operations)"]
+    end
+
+    subgraph "Google Cloud SDKs"
+        GCSSDK["cloud.google.com/go/storage"]
+        BQSDK["cloud.google.com/go/bigquery"]
+        IAMSDK["google.golang.org/api/iam"]
+    end
+
+    App --> Client
+    Client --> Config
+    Client --> Resolver
+    Client --> Resource
+
+    Resource --> Storage
+    Resource --> BQ
+    Resource --> IAM
+
+    Storage --> GCSSDK
+    BQ --> BQSDK
+    IAM --> IAMSDK
+
+    Config -.->|"Load aliases"| Resolver
+    Resolver -.->|"Path formatting"| Resource
+```
+
+### Resource Abstraction Layer
+
+```mermaid
+classDiagram
+    class Resource {
+        <<interface>>
+        +List(ctx, path, opts) []ResourceInfo
+        +Remove(ctx, path, opts) error
+        +Info(ctx, path) ResourceInfo
+        +ParsePath(path) ParsedPath
+        +FormatShort(info, alias) string
+        +FormatLong(info, alias) string
+        +FormatDetailed(info, alias) string
+    }
+
+    class GCSResource {
+        -client *storage.Client
+        +List(ctx, path, opts) []ResourceInfo
+        +Remove(ctx, path, opts) error
+        +Info(ctx, path) ResourceInfo
+    }
+
+    class BigQueryResource {
+        -client *bigquery.Client
+        +List(ctx, path, opts) []ResourceInfo
+        +Remove(ctx, path, opts) error
+        +Info(ctx, path) ResourceInfo
+    }
+
+    class IAMResource {
+        -client *iam.Client
+        +List(ctx, path, opts) []ResourceInfo
+        +Info(ctx, path) ResourceInfo
+    }
+
+    class Factory {
+        +Create(path) Resource
+        -reverseResolve PathFormatter
+    }
+
+    Resource <|.. GCSResource : implements
+    Resource <|.. BigQueryResource : implements
+    Resource <|.. IAMResource : implements
+    Factory ..> Resource : creates
+    Factory ..> GCSResource : creates
+    Factory ..> BigQueryResource : creates
+    Factory ..> IAMResource : creates
+```
+
+### Client Initialization Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Your Application
+    participant Client as client.New()
+    participant Config as Config Loader
+    participant Resolver as Alias Resolver
+    participant Factory as Resource Factory
+    participant Storage as Storage Client<br/>(Singleton)
+    participant BQ as BigQuery Client<br/>(Singleton)
+
+    App->>Client: client.New(options)
+    Client->>Config: Load config file
+    Config->>Config: Read YAML from:<br/>1. --config flag<br/>2. CIO_CONFIG env<br/>3. ~/.config/cio/config.yaml
+    Config->>Config: Expand env vars (${VAR})
+    Config-->>Client: Config object
+
+    Client->>Resolver: New(config)
+    Resolver-->>Client: Resolver instance
+
+    Client->>Factory: NewFactory(reverseResolve)
+    Factory-->>Client: Factory instance
+
+    Client->>Storage: GetClient(ctx)
+    Storage->>Storage: sync.Once initialization
+    Storage-->>Client: Singleton client
+
+    Client->>BQ: GetClient(ctx, projectID)
+    BQ->>BQ: sync.Once initialization
+    BQ-->>Client: Singleton client
+
+    Client-->>App: Client instance (c)
+
+    Note over App,BQ: Client is ready for operations
+```
+
 ## Installation
 
 ```bash
 go get github.com/thieso2/cio
+```
+
+### Complete Usage Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Your Application
+    participant Client as Client API
+    participant Resolver as Alias Resolver
+    participant Factory as Resource Factory
+    participant GCS as GCS Resource
+    participant API as Google Cloud<br/>Storage API
+
+    App->>Client: c, err := client.New()
+    Client-->>App: Client instance
+
+    App->>Client: c.Storage().List(ctx, ":am/logs/")
+    Client->>Resolver: Resolve(":am/logs/")
+    Resolver-->>Client: "gs://bucket/logs/"
+
+    Client->>Factory: Create("gs://bucket/logs/")
+    Factory-->>Client: GCSResource
+
+    Client->>GCS: List(ctx, "gs://bucket/logs/", opts)
+    GCS->>API: ListObjects(bucket, prefix)
+    API-->>GCS: Objects list
+    GCS-->>Client: []ResourceInfo
+
+    Client->>Resolver: ReverseResolve(paths)
+    Resolver-->>Client: Alias paths<br/>(":am/logs/file.txt")
+
+    Client-->>App: []ObjectInfo
+
+    App->>App: Process results
+    App->>Client: c.Close()
+    Client->>Client: Cleanup connections
 ```
 
 ## Quick Start

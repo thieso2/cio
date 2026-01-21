@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Familiar Unix-like commands (`ls`, `cp`, `rm` with various flags)
 - Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS commands
 - BigQuery listing: datasets, tables, and table schemas
+- BigQuery interactive SQL shell with proper horizontal scrolling (peterh/liner)
 - IAM listing: service accounts with metadata
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
@@ -246,6 +247,18 @@ graph TB
   - Confirmation prompts unless `-f` is used
   - Displays alias paths in confirmations and output
   - **CRITICAL**: Only deletes when explicitly requested by user
+- **shell.go**: Interactive BigQuery SQL shell (`cio query`)
+  - Uses `peterh/liner` for proper horizontal scrolling on long lines
+  - Features:
+    - Multi-line SQL input (continue until `;` is entered)
+    - Command history (saved to `~/.config/cio/query_history`)
+    - Tab completion for SQL keywords
+    - Alias resolution in SQL queries (`:mydata.table`)
+    - Meta-commands: `\d <table>` (describe), `\l` (list tables hint), `\q` (quit)
+    - Keyboard shortcuts: Ctrl+A (start), Ctrl+E (end), Ctrl+C (cancel), Ctrl+D (exit)
+  - **Important**: Migrated from `chzyer/readline` to `peterh/liner` to fix horizontal scrolling issues
+  - History file: `~/.config/cio/query_history`
+  - Example: `cio query` → starts interactive SQL shell
 
 **5. Wildcard Support (`internal/resolver/wildcard.go`)**
 - `HasWildcard()` detects `*` and `?` in paths

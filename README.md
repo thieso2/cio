@@ -669,13 +669,84 @@ cio auth print-identity-token -a https://my-service.run.app \
 
 ## Architecture
 
+### Core Architecture
+
 ```mermaid
-graph LR
-    CLI[CLI Command] --> Resolver[Alias Resolver]
-    Resolver --> Config[Config Manager]
-    Resolver --> Storage[GCS Client]
-    Storage --> GCS[Google Cloud Storage]
-    Config --> YAML[~/.config/cio/config.yaml]
+graph TB
+    CLI["CLI Command<br/>(cio ls :am)"]
+    Resolver["Alias Resolver<br/>(:am → gs://bucket/)"]
+    Config["Config Manager<br/>(YAML + Env Vars)"]
+    Factory["Resource Factory<br/>(GCS, BQ, IAM)"]
+    GCS["GCS Resource<br/>Handler"]
+    BQ["BigQuery Resource<br/>Handler"]
+    IAM["IAM Resource<br/>Handler"]
+    Storage["GCS Client<br/>(Singleton)"]
+    BigQuery["BigQuery Client<br/>(Singleton)"]
+    IAMClient["IAM Client<br/>(Singleton)"]
+
+    CLI --> Resolver
+    Resolver --> Config
+    Resolver --> Factory
+    Factory --> GCS
+    Factory --> BQ
+    Factory --> IAM
+    GCS --> Storage
+    BQ --> BigQuery
+    IAM --> IAMClient
+    Storage --> GCPAPI["Google Cloud Storage API"]
+    BigQuery --> BQAPI["BigQuery API"]
+    IAMClient --> IAMAPI["IAM API"]
+
+    Config --> YAML["~/.config/cio/<br/>config.yaml"]
+```
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CIO as cio CLI
+    participant ADC as Application Default<br/>Credentials
+    participant GCP as Google Cloud<br/>APIs
+
+    User->>CIO: cio ls :am
+    CIO->>ADC: Request credentials
+    alt GOOGLE_APPLICATION_CREDENTIALS set
+        ADC-->>CIO: Service account key
+    else gcloud auth login
+        ADC-->>CIO: User credentials
+    else Running on GCE/Cloud Run
+        ADC-->>CIO: Metadata server credentials
+    end
+    CIO->>GCP: API call with credentials
+    GCP-->>CIO: Response
+    CIO-->>User: Formatted output
+```
+
+### Command Execution Flow
+
+```mermaid
+flowchart TB
+    Start["User runs command<br/>cio ls :am/2024/"]
+    Parse["Parse command<br/>& flags"]
+    LoadConfig["Load config from<br/>~/.config/cio/config.yaml"]
+    Resolve["Resolve alias<br/>:am → gs://bucket/"]
+    Detect["Detect resource type<br/>(GCS/BQ/IAM)"]
+    Create["Create resource handler<br/>via Factory"]
+    Execute["Execute operation<br/>(List/Info/Copy/Remove)"]
+    Format["Format output<br/>(Short/Long/Detailed)"]
+    ReverseResolve["Reverse resolve<br/>gs://bucket/file → :am/file"]
+    Display["Display results"]
+
+    Start --> Parse
+    Parse --> LoadConfig
+    LoadConfig --> Resolve
+    Resolve --> Detect
+    Detect --> Create
+    Create --> Execute
+    Execute --> Format
+    Format --> ReverseResolve
+    ReverseResolve --> Display
 ```
 
 ## Authentication

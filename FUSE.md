@@ -39,6 +39,56 @@ The `cio` codebase provides excellent foundations:
 
 ## 2. Filesystem Hierarchy Design
 
+### Architecture Overview
+
+```mermaid
+graph TB
+    Mount["FUSE Mount Point<br/>/mnt/gcp/"]
+    Root["Project Root Node<br/>project-id/"]
+    Storage["Storage Service<br/>storage/"]
+    BQ["BigQuery Service<br/>bigquery/"]
+    PS["Pub/Sub Service<br/>pubsub/"]
+
+    Bucket["Bucket Node<br/>my-bucket/"]
+    Object["Object Node<br/>file.txt"]
+    Meta["Metadata Dir<br/>.meta/"]
+
+    Dataset["Dataset Node<br/>dataset1/"]
+    Table["Table Dir<br/>table1/"]
+    Schema["schema.json<br/>(editable)"]
+    Config["config.json<br/>(editable)"]
+    Status["_status.json<br/>(read-only)"]
+
+    Topics["Topics<br/>topics/"]
+    Topic["Topic Dir<br/>my-topic/"]
+    Message["_message<br/>(write-only)"]
+    Subs["subscriptions/"]
+    Sub["Sub Dir<br/>sub1/"]
+    Stream["_stream<br/>(read-only)"]
+
+    Mount --> Root
+    Root --> Storage
+    Root --> BQ
+    Root --> PS
+
+    Storage --> Bucket
+    Bucket --> Object
+    Bucket --> Meta
+
+    BQ --> Dataset
+    Dataset --> Table
+    Table --> Schema
+    Table --> Config
+    Table --> Status
+
+    PS --> Topics
+    Topics --> Topic
+    Topic --> Message
+    Topic --> Subs
+    Subs --> Sub
+    Sub --> Stream
+```
+
 ### Mount Point Structure
 
 ```
@@ -219,6 +269,97 @@ Read-only, server-generated.
   "dead_letter_policy": null,
   "retry_policy": null
 }
+```
+
+### Read/Write Data Flow
+
+```mermaid
+sequenceDiagram
+    participant App as User Application<br/>(cat, vim, cp)
+    participant FUSE as FUSE Kernel<br/>Module
+    participant FS as ciofs Handler
+    participant Cache as Cache Manager<br/>(LRU + TTL)
+    participant GCP as GCP API<br/>(GCS/BQ)
+
+    Note over App,GCP: Read Operation
+    App->>FUSE: read(/mnt/gcp/project/storage/bucket/file.txt)
+    FUSE->>FS: Read(path, offset, size)
+    FS->>Cache: Check cache
+    alt Cache hit
+        Cache-->>FS: Return cached data
+    else Cache miss
+        FS->>GCP: GetObject(bucket, object)
+        GCP-->>FS: Object data
+        FS->>Cache: Store in cache
+    end
+    FS-->>FUSE: Data buffer
+    FUSE-->>App: File content
+
+    Note over App,GCP: Write Operation
+    App->>FUSE: write(/mnt/gcp/project/storage/bucket/new.txt)
+    FUSE->>FS: Write(path, data)
+    FS->>FS: Buffer in memory
+    FS->>GCP: PutObject(bucket, object, data)
+    GCP-->>FS: Success
+    FS->>Cache: Invalidate cache
+    FS-->>FUSE: Bytes written
+    FUSE-->>App: Success
+```
+
+### Caching Architecture
+
+```mermaid
+graph TB
+    Request["FUSE Request<br/>(readdir, read, getattr)"]
+    CacheMgr["Cache Manager"]
+    MetaCache["Metadata Cache<br/>(60s TTL, 100MB)"]
+    ContentCache["Content Cache<br/>(300s TTL, 1GB)"]
+    GCS["GCS API"]
+    BQ["BigQuery API"]
+
+    Request --> CacheMgr
+    CacheMgr --> Check{"Cache hit?"}
+    Check -->|Yes| MetaCache
+    Check -->|Yes| ContentCache
+    Check -->|No| API["API Call"]
+    API --> GCS
+    API --> BQ
+    GCS --> Store["Store in cache"]
+    BQ --> Store
+    Store --> MetaCache
+    Store --> ContentCache
+
+    Invalidate["Invalidation Triggers"]
+    Invalidate --> Touch["touch . in directory"]
+    Invalidate --> Write["Write operation"]
+    Invalidate --> ETag["ETag mismatch"]
+    Touch --> CacheMgr
+    Write --> CacheMgr
+    ETag --> CacheMgr
+```
+
+### Implementation Timeline
+
+```mermaid
+gantt
+    title FUSE Implementation Phases
+    dateFormat YYYY-MM-DD
+    section Phase 0
+    Foundation                    :p0, 2026-01-20, 1w
+    section Phase 1
+    GCS Read-Only                 :p1, after p0, 2w
+    section Phase 2
+    GCS Write Support             :p2, after p1, 1w
+    section Phase 3
+    BigQuery Read-Only            :p3, after p2, 1w
+    section Phase 4
+    BigQuery Write Support        :p4, after p3, 1w
+    section Phase 5
+    Pub/Sub Support               :p5, after p4, 2w
+    section Phase 6
+    Tar Export/Import             :p6, after p5, 2w
+    section Phase 7
+    Production Features           :p7, after p6, 2w
 ```
 
 ## 4. Implementation Phases
@@ -448,6 +589,43 @@ EOF
 - Write-only `_message` file for publishing
 - Read-only `_stream` file for consuming messages
 - Config files for topics/subscriptions
+
+#### Pub/Sub Streaming Architecture
+
+```mermaid
+sequenceDiagram
+    participant User as User Process<br/>(cat _stream)
+    participant FUSE as FUSE Handler
+    participant Stream as Stream Node
+    participant Buffer as Ring Buffer<br/>(1MB max)
+    participant BG as Background<br/>Goroutine
+    participant PubSub as Pub/Sub API
+
+    User->>FUSE: Open(_stream)
+    FUSE->>Stream: Open(ctx, flags)
+    Stream->>Buffer: Create ring buffer
+    Stream->>BG: Start streaming goroutine
+    BG->>PubSub: subscription.Receive(ctx, callback)
+
+    loop Streaming messages
+        PubSub->>BG: Deliver message
+        BG->>Buffer: Write formatted message<br/>[timestamp] id: data
+        BG->>PubSub: Ack message
+    end
+
+    User->>FUSE: Read(_stream, buffer, size)
+    FUSE->>Stream: Read(ctx, dest, offset)
+    Stream->>Buffer: Read(size)
+    Buffer-->>Stream: Message data
+    Stream-->>FUSE: Message data
+    FUSE-->>User: Display message
+
+    User->>FUSE: Close(_stream)
+    FUSE->>Stream: Release()
+    Stream->>BG: Cancel context
+    BG->>PubSub: Stop receiving
+    Stream->>Buffer: Cleanup
+```
 
 **Publishing**:
 ```go
