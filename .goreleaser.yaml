@@ -86,14 +86,17 @@ release:
   mode: replace
   draft: false
 
-# Homebrew tap (optional - uncomment if you want to publish to Homebrew)
-# brews:
-#   - repository:
-#       owner: thieso2
-#       name: homebrew-tap
-#     directory: Formula
-#     homepage: https://github.com/thieso2/cio
-#     description: "Fast Go CLI for Google Cloud Storage and BigQuery"
-#     license: MIT
-#     test: |
-#       system "#{bin}/cio", "version"
+# Homebrew tap - auto-updates thieso2/homebrew-tap on release
+brews:
+  - repository:
+      owner: thieso2
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/thieso2/cio
+    description: "Fast Go CLI for Google Cloud Storage and BigQuery"
+    license: MIT
+    install: |
+      bin.install "cio"
+    test: |
+      system "#{bin}/cio", "--version"
