@@ -77,6 +77,7 @@ func (g *GCSResource) List(ctx context.Context, path string, options *ListOption
 		LongFormat:    options.LongFormat,
 		HumanReadable: options.HumanReadable,
 		MaxResults:    options.MaxResults,
+		Delimiter:     "/", // Use delimiter to group by directories (non-recursive listing)
 	}
 
 	var objects []*storage.ObjectInfo
