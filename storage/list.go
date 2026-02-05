@@ -101,7 +101,61 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	// Extract prefix and wildcard pattern
 	prefix, wildcardPattern := splitPattern(pattern)
 
-	// List all objects with the prefix
+	// For recursive mode with wildcards, we need to:
+	// 1. First find matching directories (non-recursive)
+	// 2. Then list contents of each matching directory recursively
+	if opts != nil && opts.Recursive {
+		// First, do a non-recursive list to find matching items
+		nonRecursiveOpts := &ListOptions{
+			Recursive:     false,
+			LongFormat:    opts.LongFormat,
+			HumanReadable: opts.HumanReadable,
+			Delimiter:     "/",
+			MaxResults:    0, // No limit for initial scan
+		}
+
+		topLevel, err := List(ctx, bucket, prefix, nonRecursiveOpts)
+		if err != nil {
+			return nil, err
+		}
+
+		var results []*ObjectInfo
+		for _, obj := range topLevel {
+			name := extractName(obj, prefix)
+			if !matchesPattern(name, wildcardPattern) {
+				continue
+			}
+
+			if obj.IsPrefix {
+				// For matching directories, list their contents recursively
+				// Extract the directory path from gs://bucket/path/
+				dirPrefix := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
+				recursiveOpts := &ListOptions{
+					Recursive:     true,
+					LongFormat:    opts.LongFormat,
+					HumanReadable: opts.HumanReadable,
+					MaxResults:    0,
+				}
+				dirContents, err := List(ctx, bucket, dirPrefix, recursiveOpts)
+				if err != nil {
+					return nil, err
+				}
+				results = append(results, dirContents...)
+			} else {
+				// For matching files, include them directly
+				results = append(results, obj)
+			}
+		}
+
+		// Apply max results limit if specified
+		if opts.MaxResults > 0 && len(results) > opts.MaxResults {
+			results = results[:opts.MaxResults]
+		}
+
+		return results, nil
+	}
+
+	// Non-recursive mode: list and filter
 	allObjects, err := List(ctx, bucket, prefix, opts)
 	if err != nil {
 		return nil, err
@@ -110,39 +164,41 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	// Filter objects that match the pattern
 	var results []*ObjectInfo
 	for _, obj := range allObjects {
-		var name string
-
-		if obj.IsPrefix {
-			// For directories, extract the directory name from the path
-			// gs://bucket/prefix/dirname/ -> dirname
-			dirPath := strings.TrimSuffix(obj.Path, "/")
-			lastSlash := strings.LastIndex(dirPath, "/")
-			if lastSlash != -1 {
-				name = dirPath[lastSlash+1:]
-			} else {
-				name = dirPath
-			}
-		} else {
-			// Extract object name from path (gs://bucket/object -> object)
-			pathParts := strings.SplitN(obj.Path, "/", 4)
-			if len(pathParts) < 4 {
-				continue
-			}
-			objectName := pathParts[3]
-
-			// Get just the filename from the full path
-			name = objectName
-			if strings.HasPrefix(name, prefix) {
-				name = strings.TrimPrefix(name, prefix)
-			}
-		}
-
+		name := extractName(obj, prefix)
 		if matchesPattern(name, wildcardPattern) {
 			results = append(results, obj)
 		}
 	}
 
 	return results, nil
+}
+
+// extractName extracts the name component from an object for pattern matching
+func extractName(obj *ObjectInfo, prefix string) string {
+	if obj.IsPrefix {
+		// For directories, extract the directory name from the path
+		// gs://bucket/prefix/dirname/ -> dirname
+		dirPath := strings.TrimSuffix(obj.Path, "/")
+		lastSlash := strings.LastIndex(dirPath, "/")
+		if lastSlash != -1 {
+			return dirPath[lastSlash+1:]
+		}
+		return dirPath
+	}
+
+	// Extract object name from path (gs://bucket/object -> object)
+	pathParts := strings.SplitN(obj.Path, "/", 4)
+	if len(pathParts) < 4 {
+		return ""
+	}
+	objectName := pathParts[3]
+
+	// Get just the filename from the full path
+	name := objectName
+	if strings.HasPrefix(name, prefix) {
+		name = strings.TrimPrefix(name, prefix)
+	}
+	return name
 }
 
 // parseGCSPath parses a gs:// path into bucket and prefix
