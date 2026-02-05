@@ -110,22 +110,31 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	// Filter objects that match the pattern
 	var results []*ObjectInfo
 	for _, obj := range allObjects {
-		// Skip prefixes/directories
+		var name string
+
 		if obj.IsPrefix {
-			continue
-		}
+			// For directories, extract the directory name from the path
+			// gs://bucket/prefix/dirname/ -> dirname
+			dirPath := strings.TrimSuffix(obj.Path, "/")
+			lastSlash := strings.LastIndex(dirPath, "/")
+			if lastSlash != -1 {
+				name = dirPath[lastSlash+1:]
+			} else {
+				name = dirPath
+			}
+		} else {
+			// Extract object name from path (gs://bucket/object -> object)
+			pathParts := strings.SplitN(obj.Path, "/", 4)
+			if len(pathParts) < 4 {
+				continue
+			}
+			objectName := pathParts[3]
 
-		// Extract object name from path (gs://bucket/object -> object)
-		pathParts := strings.SplitN(obj.Path, "/", 4)
-		if len(pathParts) < 4 {
-			continue
-		}
-		objectName := pathParts[3]
-
-		// Get just the filename from the full path
-		name := objectName
-		if strings.HasPrefix(name, prefix) {
-			name = strings.TrimPrefix(name, prefix)
+			// Get just the filename from the full path
+			name = objectName
+			if strings.HasPrefix(name, prefix) {
+				name = strings.TrimPrefix(name, prefix)
+			}
 		}
 
 		if matchesPattern(name, wildcardPattern) {
