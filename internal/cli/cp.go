@@ -26,6 +26,7 @@ Supports:
   - GCS to local: cio cp :am/path/file.txt ./local/
   - Recursive directory copy with -r flag
   - Wildcard patterns: cio cp ':am/logs/*.log' ./local/
+  - Directory structure preservation with -r flag
 
 Examples:
   # Upload local file to GCS
@@ -37,8 +38,11 @@ Examples:
   # Download from GCS to local
   cio cp :am/2024/data.csv ./downloads/
 
-  # Download with wildcard pattern
+  # Download with wildcard pattern (flattens directory structure)
   cio cp ':am/logs/*.log' ./local-logs/
+
+  # Download with wildcard pattern preserving structure (like cp -r)
+  cio cp -r ':am/logs/*' ./local-logs/
 
   # Recursive upload
   cio cp -r ./logs/ :am/logs/2024/
@@ -176,6 +180,7 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 		ParallelThreshold: cfg.Download.ParallelThreshold,
 		ChunkSize:         cfg.Download.ChunkSize,
 		MaxChunks:         maxChunks,
+		PreserveStructure: cpRecursive, // Preserve directory structure when -r flag is used
 	}
 
 	// Check if path contains wildcards

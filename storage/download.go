@@ -28,6 +28,8 @@ type DownloadOptions struct {
 	ChunkSize int64
 	// MaxChunks is the maximum number of parallel chunks per file
 	MaxChunks int
+	// PreserveStructure preserves directory structure when downloading with wildcards
+	PreserveStructure bool
 }
 
 // fileDownload represents a file to be downloaded
@@ -392,9 +394,20 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 			continue
 		}
 
-		// Calculate local file path (use just the filename)
-		filename := filepath.Base(attrs.Name)
-		localFilePath := filepath.Join(localPath, filename)
+		// Calculate local file path
+		var localFilePath string
+		if opts != nil && opts.PreserveStructure {
+			// Preserve directory structure (like cp -r)
+			relPath := strings.TrimPrefix(attrs.Name, prefix)
+			if relPath == "" {
+				continue
+			}
+			localFilePath = filepath.Join(localPath, filepath.FromSlash(relPath))
+		} else {
+			// Flatten directory structure (just use filename)
+			filename := filepath.Base(attrs.Name)
+			localFilePath = filepath.Join(localPath, filename)
+		}
 		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, attrs.Name)
 
 		filesToDownload = append(filesToDownload, fileDownload{
