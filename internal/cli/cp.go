@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	gcs "cloud.google.com/go/storage"
 	"github.com/spf13/cobra"
@@ -49,7 +50,7 @@ Examples:
 
   # Recursive download
   cio cp -r :am/logs/2024/ ./local-logs/`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.MinimumNArgs(2),
 	RunE: runCp,
 }
 
@@ -60,42 +61,25 @@ func init() {
 
 func runCp(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	source := args[0]
-	destination := args[1]
+	sources := args[:len(args)-1]
+	destination := args[len(args)-1]
 
-	// Determine copy direction
-	sourceIsLocal := !resolver.IsGCSPath(source)
-	destIsLocal := !resolver.IsGCSPath(destination)
-
-	// Resolve aliases and track if they were aliases
 	r := resolver.Create(cfg)
 
-	var sourcePath, destPath string
-	var err error
-	var sourceWasAlias, destWasAlias bool
-
-	if !sourceIsLocal {
-		// Source is GCS - check if it's an alias
-		if resolver.IsGCSPath(source) {
-			sourcePath = source
-			sourceWasAlias = false
-		} else {
-			sourcePath, err = r.Resolve(source)
-			if err != nil {
-				return fmt.Errorf("failed to resolve source: %w", err)
-			}
-			sourceWasAlias = true
-		}
-	} else {
-		sourcePath = source
+	// isCloudPath returns true for gs://, bq://, iam:// and alias (:) paths
+	isCloudPath := func(p string) bool {
+		return resolver.IsGCSPath(p) || resolver.IsBQPath(p) || resolver.IsIAMPath(p) || strings.HasPrefix(p, ":")
 	}
 
+	// Resolve destination once
+	destIsLocal := !isCloudPath(destination)
+	var destPath string
+	var destWasAlias bool
 	if !destIsLocal {
-		// Destination is GCS - check if it's an alias
 		if resolver.IsGCSPath(destination) {
 			destPath = destination
-			destWasAlias = false
 		} else {
+			var err error
 			destPath, err = r.Resolve(destination)
 			if err != nil {
 				return fmt.Errorf("failed to resolve destination: %w", err)
@@ -106,26 +90,46 @@ func runCp(cmd *cobra.Command, args []string) error {
 		destPath = destination
 	}
 
-	// Get GCS client
+	// Get GCS client (needed for any GCS operation)
 	client, err := storage.GetClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create GCS client: %w", err)
 	}
 
-	// Execute copy based on direction
-	if sourceIsLocal && !destIsLocal {
-		// Local -> GCS (upload)
-		return uploadPath(ctx, client, r, sourcePath, destPath, destWasAlias)
-	} else if !sourceIsLocal && destIsLocal {
-		// GCS -> Local (download)
-		return downloadPath(ctx, client, r, sourcePath, destPath, sourceWasAlias)
-	} else if !sourceIsLocal && !destIsLocal {
-		// GCS -> GCS (not yet implemented)
-		return fmt.Errorf("GCS to GCS copy not yet implemented")
-	} else {
-		// Local -> Local (use system cp instead)
-		return fmt.Errorf("use system 'cp' command for local to local copy")
+	for _, source := range sources {
+		sourceIsLocal := !isCloudPath(source)
+
+		var sourcePath string
+		var sourceWasAlias bool
+		if !sourceIsLocal {
+			if resolver.IsGCSPath(source) {
+				sourcePath = source
+			} else {
+				sourcePath, err = r.Resolve(source)
+				if err != nil {
+					return fmt.Errorf("failed to resolve source %q: %w", source, err)
+				}
+				sourceWasAlias = true
+			}
+		} else {
+			sourcePath = source
+		}
+
+		var copyErr error
+		if sourceIsLocal && !destIsLocal {
+			copyErr = uploadPath(ctx, client, r, sourcePath, destPath, destWasAlias)
+		} else if !sourceIsLocal && destIsLocal {
+			copyErr = downloadPath(ctx, client, r, sourcePath, destPath, sourceWasAlias)
+		} else if !sourceIsLocal && !destIsLocal {
+			return fmt.Errorf("GCS to GCS copy not yet implemented")
+		} else {
+			return fmt.Errorf("use system 'cp' command for local to local copy")
+		}
+		if copyErr != nil {
+			return copyErr
+		}
 	}
+	return nil
 }
 
 func uploadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver, localPath, gcsPath string, destWasAlias bool) error {
