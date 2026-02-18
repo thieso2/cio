@@ -86,7 +86,7 @@ func UploadFile(ctx context.Context, client *storage.Client, localPath, gcsPath 
 		return fmt.Errorf("failed to close writer: %w", err)
 	}
 
-	fmt.Printf("Uploaded: %s → %s\n", localPath, formatter(fullGCSPath))
+	fmt.Printf("Uploaded: %s → %s (%s)\n", localPath, formatter(fullGCSPath), FormatSize(fileInfo.Size()))
 	return nil
 }
 
@@ -164,9 +164,10 @@ func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket str
 
 	// Channel for completed uploads (for progress tracking)
 	type upload struct {
-		localPath   string
-		fullGCSPath string
-		err         error
+		localPath    string
+		fullGCSPath  string
+		bytesWritten int64
+		err          error
 	}
 	uploads := make(chan upload, totalCount)
 
@@ -186,10 +187,11 @@ func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket str
 				}
 				mu.Unlock()
 			} else {
+				size := FormatSize(u.bytesWritten)
 				if verbose {
-					fmt.Printf("Uploaded %d/%d: %s to %s\n", count, totalCount, u.localPath, formatter(u.fullGCSPath))
+					fmt.Printf("Uploaded %d/%d: %s to %s (%s)\n", count, totalCount, u.localPath, formatter(u.fullGCSPath), size)
 				} else {
-					fmt.Printf("Uploaded %d/%d: %s → %s\n", count, totalCount, u.localPath, formatter(u.fullGCSPath))
+					fmt.Printf("Uploaded %d/%d: %s → %s (%s)\n", count, totalCount, u.localPath, formatter(u.fullGCSPath), size)
 				}
 			}
 		}
@@ -216,6 +218,13 @@ func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket str
 			}
 			defer file.Close()
 
+			// Stat for size
+			info, err := file.Stat()
+			if err != nil {
+				uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: err}
+				return
+			}
+
 			// Create GCS object writer
 			obj := bkt.Object(fileUpload.objectPath)
 			writer := obj.NewWriter(ctx)
@@ -234,7 +243,7 @@ func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket str
 			}
 
 			// Send result to progress reporter
-			uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, err: nil}
+			uploads <- upload{localPath: fileUpload.localPath, fullGCSPath: fileUpload.fullGCSPath, bytesWritten: info.Size(), err: nil}
 		}(fu)
 	}
 
