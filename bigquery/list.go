@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -192,6 +193,7 @@ func ListDatasets(ctx context.Context, projectID string) ([]*BQObjectInfo, error
 	}
 
 	var results []*BQObjectInfo
+	apilog.Logf("[BQ] Datasets.List(project=%s)", projectID)
 	it := client.Datasets(ctx)
 
 	for {
@@ -204,6 +206,7 @@ func ListDatasets(ctx context.Context, projectID string) ([]*BQObjectInfo, error
 		}
 
 		// Get dataset metadata
+		apilog.Logf("[BQ] Dataset.Metadata(project=%s, dataset=%s)", projectID, dataset.DatasetID)
 		meta, err := dataset.Metadata(ctx)
 		if err != nil {
 			// Skip datasets we can't access
@@ -232,6 +235,7 @@ func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectIn
 
 	dataset := client.Dataset(datasetID)
 	var results []*BQObjectInfo
+	apilog.Logf("[BQ] Tables.List(project=%s, dataset=%s)", projectID, datasetID)
 	it := dataset.Tables(ctx)
 
 	for {
@@ -244,6 +248,7 @@ func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectIn
 		}
 
 		// Get table metadata
+		apilog.Logf("[BQ] Table.Metadata(project=%s, dataset=%s, table=%s)", projectID, datasetID, table.TableID)
 		meta, err := table.Metadata(ctx)
 		if err != nil {
 			// Skip tables we can't access
@@ -273,6 +278,7 @@ func DescribeTable(ctx context.Context, projectID, datasetID, tableID string) (*
 	}
 
 	table := client.Dataset(datasetID).Table(tableID)
+	apilog.Logf("[BQ] Table.Metadata(project=%s, dataset=%s, table=%s)", projectID, datasetID, tableID)
 	meta, err := table.Metadata(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table metadata: %w", err)

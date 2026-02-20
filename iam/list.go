@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/thieso2/cio/apilog"
 )
 
 // ServiceAccountInfo represents information about a service account.
@@ -71,6 +73,7 @@ func ListServiceAccounts(ctx context.Context, projectID string) ([]*ServiceAccou
 	projectResource := fmt.Sprintf("projects/%s", projectID)
 
 	// List service accounts
+	apilog.Logf("[IAM] ServiceAccounts.List(%s)", projectResource)
 	resp, err := client.Projects.ServiceAccounts.List(projectResource).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list service accounts: %w", err)
@@ -102,6 +105,7 @@ func GetServiceAccount(ctx context.Context, projectID, accountEmail string) (*Se
 	resourceName := fmt.Sprintf("projects/%s/serviceAccounts/%s", projectID, accountEmail)
 
 	// Get service account
+	apilog.Logf("[IAM] ServiceAccounts.Get(%s)", resourceName)
 	sa, err := client.Projects.ServiceAccounts.Get(resourceName).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service account: %w", err)
@@ -178,6 +182,7 @@ func ListServiceAccountKeys(ctx context.Context, projectID, accountEmail string)
 	resourceName := fmt.Sprintf("projects/%s/serviceAccounts/%s", projectID, accountEmail)
 
 	// List keys
+	apilog.Logf("[IAM] ServiceAccounts.Keys.List(%s)", resourceName)
 	resp, err := client.Projects.ServiceAccounts.Keys.List(resourceName).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list service account keys: %w", err)

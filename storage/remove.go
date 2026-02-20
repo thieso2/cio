@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"cloud.google.com/go/storage"
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -26,6 +27,7 @@ func RemoveObject(ctx context.Context, client *storage.Client, bucket, object st
 	fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, object)
 
 	obj := client.Bucket(bucket).Object(object)
+	apilog.Logf("[GCS] Object.Delete(gs://%s/%s)", bucket, object)
 	if err := obj.Delete(ctx); err != nil {
 		return fmt.Errorf("failed to delete object: %w", err)
 	}
@@ -49,6 +51,7 @@ func RemoveDirectory(ctx context.Context, client *storage.Client, bucket, prefix
 
 	// First pass: collect all objects to delete
 	var objectsToDelete []string
+	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()
@@ -87,6 +90,7 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 
 	// First pass: collect all matching objects
 	var objectsToDelete []string
+	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
 	it := bkt.Objects(ctx, query)
 	for {
 		attrs, err := it.Next()

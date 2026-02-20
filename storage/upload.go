@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"cloud.google.com/go/storage"
+	"github.com/thieso2/cio/apilog"
 	"github.com/thieso2/cio/resolver"
 )
 
@@ -73,6 +74,7 @@ func UploadFile(ctx context.Context, client *storage.Client, localPath, gcsPath 
 
 	// Create GCS object writer
 	obj := client.Bucket(bucket).Object(objectPath)
+	apilog.Logf("[GCS] Object.NewWriter(gs://%s/%s)", bucket, objectPath)
 	writer := obj.NewWriter(ctx)
 
 	// Copy file contents to GCS
@@ -227,6 +229,7 @@ func uploadFilesParallel(ctx context.Context, client *storage.Client, bucket str
 
 			// Create GCS object writer
 			obj := bkt.Object(fileUpload.objectPath)
+			apilog.Logf("[GCS] Object.NewWriter(%s)", fileUpload.fullGCSPath)
 			writer := obj.NewWriter(ctx)
 
 			// Copy file contents

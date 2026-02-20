@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -70,6 +71,7 @@ func DownloadFile(ctx context.Context, client *storage.Client, bucket, object, l
 
 	// Get object attributes to check size
 	obj := client.Bucket(bucket).Object(object)
+	apilog.Logf("[GCS] Object.Attrs(gs://%s/%s)", bucket, object)
 	attrs, err := obj.Attrs(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get object attributes: %w", err)
@@ -101,6 +103,7 @@ func DownloadFile(ctx context.Context, client *storage.Client, bucket, object, l
 	defer file.Close()
 
 	// Get GCS object reader
+	apilog.Logf("[GCS] Object.NewReader(gs://%s/%s)", bucket, object)
 	reader, err := obj.NewReader(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to read from GCS: %w", err)
@@ -213,6 +216,7 @@ func downloadFileParallel(ctx context.Context, client *storage.Client, bucket, o
 	}
 
 	// Download each chunk
+	apilog.Logf("[GCS] Object.NewRangeReader(gs://%s/%s, chunks=%d)", bucket, object, numChunks)
 	for _, chunk := range chunks {
 		wg.Add(1)
 		go func(c chunkDownload) {

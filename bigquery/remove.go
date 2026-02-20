@@ -3,6 +3,8 @@ package bigquery
 import (
 	"context"
 	"fmt"
+
+	"github.com/thieso2/cio/apilog"
 )
 
 // PathFormatter is a function that converts full paths to alias format
@@ -24,6 +26,7 @@ func RemoveTable(ctx context.Context, projectID, datasetID, tableID string, form
 		displayPath = formatter(fullPath)
 	}
 
+	apilog.Logf("[BQ] Table.Delete(bq://%s.%s.%s)", projectID, datasetID, tableID)
 	if err := table.Delete(ctx); err != nil {
 		return fmt.Errorf("failed to delete table: %w", err)
 	}
@@ -71,6 +74,7 @@ func RemoveDataset(ctx context.Context, projectID, datasetID string, recursive b
 		displayPath = formatter(fullPath)
 	}
 
+	apilog.Logf("[BQ] Dataset.Delete(bq://%s.%s)", projectID, datasetID)
 	if err := dataset.Delete(ctx); err != nil {
 		return fmt.Errorf("failed to delete dataset: %w", err)
 	}

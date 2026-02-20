@@ -11,6 +11,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"github.com/olekukonko/tablewriter"
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -44,6 +45,7 @@ func ExecuteQuery(ctx context.Context, projectID, sql string, maxResults int) (*
 
 	query := client.Query(sql)
 
+	apilog.Logf("[BQ] Query.Run(project=%s)", projectID)
 	job, err := query.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
@@ -105,6 +107,7 @@ func DryRunQuery(ctx context.Context, projectID, sql string) (int64, error) {
 	query := client.Query(sql)
 	query.DryRun = true
 
+	apilog.Logf("[BQ] Query.Run(project=%s, dry_run=true)", projectID)
 	job, err := query.Run(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("query validation failed: %w", err)

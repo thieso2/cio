@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -52,6 +53,7 @@ func List(ctx context.Context, bucket, prefix string, opts *ListOptions) ([]*Obj
 
 	// Execute query
 	bucketHandle := client.Bucket(bucket)
+	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q, recursive=%v)", bucket, query.Prefix, opts.Recursive)
 	it := bucketHandle.Objects(ctx, query)
 
 	var results []*ObjectInfo
@@ -96,109 +98,141 @@ func ListByPath(ctx context.Context, gcsPath string, opts *ListOptions) ([]*Obje
 	return List(ctx, bucket, prefix, opts)
 }
 
-// ListWithPattern lists objects matching a wildcard pattern
+// ListWithPattern lists objects matching a wildcard pattern using level-by-level
+// expansion. The pattern is split into '/' segments and expanded one level at a
+// time, so only directories that can possibly match are traversed.
+//
+// Examples:
+//
+//	"*/dumps/*schema*"   – lists top-level dirs, descends into <x>/dumps/, filters
+//	"logs/2024/*.log"    – constant prefix collapsed, single-level filter at the end
+//	"2024/*/data.csv"    – lists 2024/ sub-dirs, then checks for exact data.csv
 func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
-	// Extract prefix and wildcard pattern
-	prefix, wildcardPattern := splitPattern(pattern)
+	if opts == nil {
+		opts = DefaultListOptions()
+	}
 
-	// For recursive mode with wildcards, we need to:
-	// 1. First find matching directories (non-recursive)
-	// 2. Then list contents of each matching directory recursively
-	if opts != nil && opts.Recursive {
-		// First, do a non-recursive list to find matching items
-		nonRecursiveOpts := &ListOptions{
-			Recursive:     false,
-			LongFormat:    opts.LongFormat,
-			HumanReadable: opts.HumanReadable,
-			Delimiter:     "/",
-			MaxResults:    0, // No limit for initial scan
+	segments := strings.Split(pattern, "/")
+
+	// Active GCS prefixes we are currently expanding.
+	prefixes := []string{""}
+
+	// Expand all segments except the last one.
+	for _, seg := range segments[:len(segments)-1] {
+		if !strings.ContainsAny(seg, "*?") {
+			// Constant segment: fold directly into every prefix – no API call.
+			for i := range prefixes {
+				prefixes[i] += seg + "/"
+			}
+			continue
 		}
 
-		topLevel, err := List(ctx, bucket, prefix, nonRecursiveOpts)
+		// Wildcard segment: list one level under each prefix, keep dirs that match.
+		var next []string
+		for _, prefix := range prefixes {
+			dirs, err := listDirsMatchingSegment(ctx, bucket, prefix, seg, opts)
+			if err != nil {
+				return nil, err
+			}
+			next = append(next, dirs...)
+		}
+		prefixes = next
+		if len(prefixes) == 0 {
+			return nil, nil
+		}
+	}
+
+	// Expand the last segment across all active prefixes.
+	lastSeg := segments[len(segments)-1]
+	var results []*ObjectInfo
+	for _, prefix := range prefixes {
+		objs, err := listMatchingLastSegment(ctx, bucket, prefix, lastSeg, opts)
 		if err != nil {
 			return nil, err
 		}
-
-		var results []*ObjectInfo
-		for _, obj := range topLevel {
-			name := extractName(obj, prefix)
-			if !matchesPattern(name, wildcardPattern) {
-				continue
-			}
-
-			if obj.IsPrefix {
-				// For matching directories, list their contents recursively
-				// Extract the directory path from gs://bucket/path/
-				dirPrefix := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
-				recursiveOpts := &ListOptions{
-					Recursive:     true,
-					LongFormat:    opts.LongFormat,
-					HumanReadable: opts.HumanReadable,
-					MaxResults:    0,
-				}
-				dirContents, err := List(ctx, bucket, dirPrefix, recursiveOpts)
-				if err != nil {
-					return nil, err
-				}
-				results = append(results, dirContents...)
-			} else {
-				// For matching files, include them directly
-				results = append(results, obj)
-			}
-		}
-
-		// Apply max results limit if specified
-		if opts.MaxResults > 0 && len(results) > opts.MaxResults {
-			results = results[:opts.MaxResults]
-		}
-
-		return results, nil
+		results = append(results, objs...)
 	}
 
-	// Non-recursive mode: list and filter
-	allObjects, err := List(ctx, bucket, prefix, opts)
-	if err != nil {
-		return nil, err
+	if opts.MaxResults > 0 && len(results) > opts.MaxResults {
+		results = results[:opts.MaxResults]
 	}
-
-	// Filter objects that match the pattern
-	var results []*ObjectInfo
-	for _, obj := range allObjects {
-		name := extractName(obj, prefix)
-		if matchesPattern(name, wildcardPattern) {
-			results = append(results, obj)
-		}
-	}
-
 	return results, nil
 }
 
-// extractName extracts the name component from an object for pattern matching
-func extractName(obj *ObjectInfo, prefix string) string {
-	if obj.IsPrefix {
-		// For directories, extract the directory name from the path
-		// gs://bucket/prefix/dirname/ -> dirname
-		dirPath := strings.TrimSuffix(obj.Path, "/")
-		lastSlash := strings.LastIndex(dirPath, "/")
-		if lastSlash != -1 {
-			return dirPath[lastSlash+1:]
+// listDirsMatchingSegment lists one level below prefix (non-recursive) and
+// returns the GCS prefixes of directories whose name matches seg.
+func listDirsMatchingSegment(ctx context.Context, bucket, prefix, seg string, opts *ListOptions) ([]string, error) {
+	objects, err := List(ctx, bucket, prefix, &ListOptions{
+		Recursive: false, Delimiter: "/",
+		LongFormat: opts.LongFormat, HumanReadable: opts.HumanReadable,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, obj := range objects {
+		if !obj.IsPrefix {
+			continue
 		}
-		return dirPath
+		name := relSegmentName(bucket, prefix, obj)
+		if complexWildcardMatch(name, seg) {
+			dirs = append(dirs, strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"))
+		}
+	}
+	return dirs, nil
+}
+
+// listMatchingLastSegment lists objects at prefix (non-recursive by default,
+// recursive when opts.Recursive is set) and returns those whose name matches seg.
+func listMatchingLastSegment(ctx context.Context, bucket, prefix, seg string, opts *ListOptions) ([]*ObjectInfo, error) {
+	if opts.Recursive {
+		// Recursive: flat list under prefix, match the filename portion only.
+		all, err := List(ctx, bucket, prefix, &ListOptions{
+			Recursive: true,
+			LongFormat: opts.LongFormat, HumanReadable: opts.HumanReadable,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var results []*ObjectInfo
+		for _, obj := range all {
+			name := relSegmentName(bucket, prefix, obj)
+			// For recursive results spanning multiple levels take only the leaf name.
+			if idx := strings.LastIndex(name, "/"); idx >= 0 {
+				name = name[idx+1:]
+			}
+			if complexWildcardMatch(name, seg) {
+				results = append(results, obj)
+			}
+		}
+		return results, nil
 	}
 
-	// Extract object name from path (gs://bucket/object -> object)
-	pathParts := strings.SplitN(obj.Path, "/", 4)
-	if len(pathParts) < 4 {
-		return ""
+	// Non-recursive: list one level, filter by seg.
+	all, err := List(ctx, bucket, prefix, &ListOptions{
+		Recursive: false, Delimiter: "/",
+		LongFormat: opts.LongFormat, HumanReadable: opts.HumanReadable,
+	})
+	if err != nil {
+		return nil, err
 	}
-	objectName := pathParts[3]
+	var results []*ObjectInfo
+	for _, obj := range all {
+		name := relSegmentName(bucket, prefix, obj)
+		if complexWildcardMatch(name, seg) {
+			results = append(results, obj)
+		}
+	}
+	return results, nil
+}
 
-	// Get just the filename from the full path
-	name := objectName
-	if strings.HasPrefix(name, prefix) {
-		name = strings.TrimPrefix(name, prefix)
-	}
-	return name
+// relSegmentName returns the single path segment for obj relative to prefix.
+// For a directory gs://bucket/a/b/ with prefix "a/" it returns "b".
+// For a file gs://bucket/a/b/c.txt with prefix "a/b/" it returns "c.txt".
+func relSegmentName(bucket, prefix string, obj *ObjectInfo) string {
+	rel := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
+	name := strings.TrimPrefix(rel, prefix)
+	return strings.TrimSuffix(name, "/")
 }
 
 // parseGCSPath parses a gs:// path into bucket and prefix

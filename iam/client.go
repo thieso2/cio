@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 )
@@ -18,6 +19,7 @@ var (
 // The client is initialized on first call and reused for subsequent calls.
 func GetClient(ctx context.Context, opts ...option.ClientOption) (*iam.Service, error) {
 	clientOnce.Do(func() {
+		apilog.Logf("[IAM] NewService()")
 		client, clientErr = iam.NewService(ctx, opts...)
 	})
 	return client, clientErr

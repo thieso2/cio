@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
 )
 
@@ -24,6 +25,7 @@ func ListBuckets(ctx context.Context, projectID string) ([]*BucketInfo, error) {
 	}
 
 	var buckets []*BucketInfo
+	apilog.Logf("[GCS] Buckets.List(project=%s)", projectID)
 	it := client.Buckets(ctx, projectID)
 
 	for {

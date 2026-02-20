@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"cloud.google.com/go/bigquery"
+	"github.com/thieso2/cio/apilog"
 )
 
 var (
@@ -19,6 +20,7 @@ var (
 // Authentication uses Application Default Credentials (ADC)
 func GetClient(ctx context.Context, projectID string) (*bigquery.Client, error) {
 	once.Do(func() {
+		apilog.Logf("[BQ] NewClient(project=%s)", projectID)
 		bqClient, clientErr = bigquery.NewClient(ctx, projectID)
 	})
 	return bqClient, clientErr

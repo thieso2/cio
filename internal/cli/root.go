@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/thieso2/cio/apilog"
 	"github.com/thieso2/cio/config"
 )
 
@@ -74,6 +75,12 @@ Examples:
   # List recursively with human-readable sizes
   cio ls -lr --human-readable :am/2024/`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Enable verbose from env var as well as --verbose flag
+		if os.Getenv("VERBOSE") != "" {
+			verbose = true
+		}
+		apilog.Verbose = verbose
+
 		var err error
 		cfg, err = config.Load(cfgFile)
 		if err != nil {
