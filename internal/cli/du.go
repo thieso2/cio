@@ -110,7 +110,7 @@ Note: parallelism is controlled by the global -j flag (default: 50).`,
 				total += entry.Size
 				fmt.Printf("%s  %s\n", formatDUSize(entry.Size, duBytes), displayPath(entry.Path))
 			}
-			fmt.Printf("%s  %s\n", formatDUSize(total, duBytes), displayPath(fullPath))
+			fmt.Printf("%s  total\n", formatDUSize(total, duBytes))
 			return nil
 		}
 
