@@ -356,7 +356,9 @@ func DownloadDirectory(ctx context.Context, client *storage.Client, bucket, pref
 	return downloadFilesParallel(ctx, client, bucket, filesToDownload, totalCount, verbose, formatter, maxWorkers, opts)
 }
 
-// DownloadWithPattern downloads all objects matching a wildcard pattern
+// DownloadWithPattern downloads all objects matching a wildcard pattern.
+// Uses ListWithPattern for level-by-level expansion (same as ls), so
+// multi-segment wildcards like "*/dumps/*schema*" work correctly.
 func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pattern, localPath string, verbose bool, formatter PathFormatter, maxWorkers int, opts *DownloadOptions) error {
 	if formatter == nil {
 		formatter = DefaultPathFormatter
@@ -366,58 +368,34 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 		return fmt.Errorf("failed to create local directory: %w", err)
 	}
 
-	// Extract prefix and wildcard pattern
-	prefix, wildcardPattern := splitPattern(pattern)
-
-	// List all objects with the prefix
-	bkt := client.Bucket(bucket)
-	query := &storage.Query{
-		Prefix: prefix,
+	// Use ListWithPattern for level-by-level wildcard expansion (same as ls).
+	// This correctly handles wildcards in directory segments, e.g. "*/dumps/*schema*".
+	matched, err := ListWithPattern(ctx, bucket, pattern, &ListOptions{Recursive: false})
+	if err != nil {
+		return fmt.Errorf("failed to list objects: %w", err)
 	}
 
-	// First pass: collect all matching objects
+	// Collect matching files (skip directory prefixes)
 	var filesToDownload []fileDownload
-
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to list objects: %w", err)
-		}
-
-		// Skip directory markers
-		if strings.HasSuffix(attrs.Name, "/") {
+	for _, obj := range matched {
+		if obj.IsPrefix {
 			continue
 		}
+		objectName := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
 
-		// Check if object matches the pattern
-		if !matchesPattern(attrs.Name, wildcardPattern) {
-			continue
-		}
-
-		// Calculate local file path
 		var localFilePath string
 		if opts != nil && opts.PreserveStructure {
-			// Preserve directory structure (like cp -r)
-			relPath := strings.TrimPrefix(attrs.Name, prefix)
-			if relPath == "" {
-				continue
-			}
-			localFilePath = filepath.Join(localPath, filepath.FromSlash(relPath))
+			// Preserve full directory structure under localPath
+			localFilePath = filepath.Join(localPath, filepath.FromSlash(objectName))
 		} else {
-			// Flatten directory structure (just use filename)
-			filename := filepath.Base(attrs.Name)
-			localFilePath = filepath.Join(localPath, filename)
+			// Flatten: use only the filename
+			localFilePath = filepath.Join(localPath, filepath.Base(objectName))
 		}
-		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, attrs.Name)
 
 		filesToDownload = append(filesToDownload, fileDownload{
-			objectName:    attrs.Name,
+			objectName:    objectName,
 			localFilePath: localFilePath,
-			fullGCSPath:   fullGCSPath,
+			fullGCSPath:   obj.Path,
 		})
 	}
 
@@ -426,7 +404,7 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 		return fmt.Errorf("no objects found matching pattern: %s", pattern)
 	}
 
-	// Second pass: download in parallel with progress counter
+	// Download in parallel with progress counter
 	return downloadFilesParallel(ctx, client, bucket, filesToDownload, totalCount, verbose, formatter, maxWorkers, opts)
 }
 
