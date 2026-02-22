@@ -23,10 +23,11 @@ func DefaultDUOptions() *DUOptions {
 	return &DUOptions{Workers: 8}
 }
 
-// DUEntry holds the size of a single immediate subdirectory.
+// DUEntry holds the size and file count of a single immediate subdirectory.
 type DUEntry struct {
-	Path string
-	Size int64
+	Path  string
+	Size  int64
+	Count int64
 }
 
 // DUResult holds the output of a disk usage calculation.
@@ -37,6 +38,8 @@ type DUResult struct {
 	RootPath string
 	// Total is the grand total across all entries plus any root-level files.
 	Total int64
+	// Count is the total number of files across all entries.
+	Count int64
 }
 
 // DiskUsage calculates disk usage for a GCS prefix, parallelizing by
@@ -83,6 +86,7 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 			return &DUResult{
 				RootPath: rootPath,
 				Total:    attrs.Size,
+				Count:    1,
 			}, nil
 		}
 		// Object not found either – return a zero result.
@@ -92,6 +96,7 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 	// Step 2: separate subdirectories from root-level files.
 	var subdirPrefixes []string
 	var rootFileTotal int64
+	var rootFileCount int64
 	for _, e := range entries {
 		if e.IsPrefix {
 			// Strip gs://bucket/ to get the raw GCS prefix string.
@@ -99,14 +104,16 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 			subdirPrefixes = append(subdirPrefixes, subPrefix)
 		} else {
 			rootFileTotal += e.Size
+			rootFileCount++
 		}
 	}
 
 	// Step 3: fan-out – one goroutine per subdirectory, bounded by a semaphore.
 	type subdirResult struct {
-		path string
-		size int64
-		err  error
+		path  string
+		size  int64
+		count int64
+		err   error
 	}
 
 	resultCh := make(chan subdirResult, len(subdirPrefixes))
@@ -120,11 +127,12 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			size, err := sumPrefix(ctx, client, bucket, sp)
+			size, count, err := sumPrefix(ctx, client, bucket, sp)
 			resultCh <- subdirResult{
-				path: fmt.Sprintf("gs://%s/%s", bucket, sp),
-				size: size,
-				err:  err,
+				path:  fmt.Sprintf("gs://%s/%s", bucket, sp),
+				size:  size,
+				count: count,
+				err:   err,
 			}
 		}(subPrefix)
 	}
@@ -135,12 +143,14 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 	// Step 4: collect and aggregate results.
 	var duEntries []DUEntry
 	total := rootFileTotal
+	totalCount := rootFileCount
 	for r := range resultCh {
 		if r.err != nil {
 			return nil, r.err
 		}
-		duEntries = append(duEntries, DUEntry{Path: r.path, Size: r.size})
+		duEntries = append(duEntries, DUEntry{Path: r.path, Size: r.size, Count: r.count})
 		total += r.size
+		totalCount += r.count
 	}
 
 	sort.Slice(duEntries, func(i, j int) bool {
@@ -151,6 +161,7 @@ func DiskUsage(ctx context.Context, bucket, prefix string, opts *DUOptions) (*DU
 		Entries:  duEntries,
 		RootPath: rootPath,
 		Total:    total,
+		Count:    totalCount,
 	}, nil
 }
 
@@ -190,9 +201,10 @@ func DiskUsagePattern(ctx context.Context, bucket, pattern string, opts *DUOptio
 	}
 
 	type subdirResult struct {
-		path string
-		size int64
-		err  error
+		path  string
+		size  int64
+		count int64
+		err   error
 	}
 
 	resultCh := make(chan subdirResult, len(matches))
@@ -207,14 +219,16 @@ func DiskUsagePattern(ctx context.Context, bucket, pattern string, opts *DUOptio
 			defer func() { <-sem }()
 
 			var size int64
+			var count int64
 			var sumErr error
 			if m.IsPrefix {
 				subPrefix := strings.TrimPrefix(m.Path, "gs://"+bucket+"/")
-				size, sumErr = sumPrefix(ctx, client, bucket, subPrefix)
+				size, count, sumErr = sumPrefix(ctx, client, bucket, subPrefix)
 			} else {
 				size = m.Size
+				count = 1
 			}
-			resultCh <- subdirResult{path: m.Path, size: size, err: sumErr}
+			resultCh <- subdirResult{path: m.Path, size: size, count: count, err: sumErr}
 		}(m)
 	}
 
@@ -226,7 +240,7 @@ func DiskUsagePattern(ctx context.Context, bucket, pattern string, opts *DUOptio
 		if r.err != nil {
 			return nil, r.err
 		}
-		entries = append(entries, DUEntry{Path: r.path, Size: r.size})
+		entries = append(entries, DUEntry{Path: r.path, Size: r.size, Count: r.count})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -236,32 +250,33 @@ func DiskUsagePattern(ctx context.Context, bucket, pattern string, opts *DUOptio
 	return entries, nil
 }
 
-// sumPrefix returns the total byte size of all objects under a GCS prefix.
-// It uses SetAttrSelection to fetch only Name and Size, significantly reducing
-// JSON payload and improving throughput for large prefixes.
-func sumPrefix(ctx context.Context, client *storage.Client, bucket, prefix string) (int64, error) {
+// sumPrefix returns the total byte size and file count of all objects under a
+// GCS prefix.  It uses SetAttrSelection to fetch only Name and Size,
+// significantly reducing JSON payload and improving throughput for large
+// prefixes.
+func sumPrefix(ctx context.Context, client *storage.Client, bucket, prefix string) (size int64, count int64, err error) {
 	q := &storage.Query{Prefix: prefix}
-	if err := q.SetAttrSelection([]string{"Name", "Size"}); err != nil {
-		return 0, fmt.Errorf("SetAttrSelection: %w", err)
+	if setErr := q.SetAttrSelection([]string{"Name", "Size"}); setErr != nil {
+		return 0, 0, fmt.Errorf("SetAttrSelection: %w", setErr)
 	}
 
 	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) [du sum]", bucket, prefix)
 	it := client.Bucket(bucket).Objects(ctx, q)
 
-	var total int64
 	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
+		attrs, iterErr := it.Next()
+		if iterErr == iterator.Done {
 			break
 		}
-		if err != nil {
-			return 0, fmt.Errorf("iterating objects under gs://%s/%s: %w", bucket, prefix, err)
+		if iterErr != nil {
+			return 0, 0, fmt.Errorf("iterating objects under gs://%s/%s: %w", bucket, prefix, iterErr)
 		}
 		// Skip zero-byte directory placeholder objects (name ends with /).
 		if attrs.Size == 0 && strings.HasSuffix(attrs.Name, "/") {
 			continue
 		}
-		total += attrs.Size
+		size += attrs.Size
+		count++
 	}
-	return total, nil
+	return size, count, nil
 }

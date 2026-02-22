@@ -14,6 +14,7 @@ import (
 var (
 	duSummarize bool
 	duBytes     bool
+	duNoSummary bool
 )
 
 var duCmd = &cobra.Command{
@@ -21,12 +22,13 @@ var duCmd = &cobra.Command{
 	Short: "Show disk usage of GCS paths",
 	Long: `Show disk usage of GCS objects, similar to Unix du.
 
-Without -s, shows the size of each immediate subdirectory followed by the
-grand total. With -s, shows only the grand total.
+Without -s, shows the size and file count of each immediate subdirectory
+followed by a grand total line. With -s, shows only the grand total.
 
 For wildcard paths, each matching entry is always shown as a per-match
-summary, followed by a grand total line (-s has no effect on the per-match
-lines since they are already summaries).
+summary (size + file count), followed by a grand total line.
+
+Use --no-summary to suppress the grand total line.
 
 Subdirectory sizes are calculated in parallel using SetAttrSelection to fetch
 only Name and Size, significantly reducing API payload and speeding up large
@@ -45,7 +47,9 @@ Examples:
 
   # Wildcard: per-match summaries + grand total
   cio du "gs://bucket/prefix*/"
-  cio du -s "gs://bucket/prefix*/"
+
+  # Suppress the grand total line
+  cio du --no-summary "gs://bucket/prefix*/"
 
   # Show raw byte counts
   cio du --bytes :am/
@@ -104,13 +108,16 @@ Note: parallelism is controlled by the global -j flag (default: 50).`,
 				}
 				return nil
 			}
-			// Each match is already a summary; always show them plus a grand total.
 			var total int64
+			var totalCount int64
 			for _, entry := range entries {
 				total += entry.Size
-				fmt.Printf("%s  %s\n", formatDUSize(entry.Size, duBytes), displayPath(entry.Path))
+				totalCount += entry.Count
+				fmt.Printf("%s  %s  %s\n", formatDUSize(entry.Size, duBytes), formatDUCount(entry.Count), displayPath(entry.Path))
 			}
-			fmt.Printf("%s  total\n", formatDUSize(total, duBytes))
+			if !duNoSummary {
+				fmt.Printf("%s  %s  total\n", formatDUSize(total, duBytes), formatDUCount(totalCount))
+			}
 			return nil
 		}
 
@@ -121,14 +128,16 @@ Note: parallelism is controlled by the global -j flag (default: 50).`,
 		}
 
 		if duSummarize {
-			fmt.Printf("%s  %s\n", formatDUSize(result.Total, duBytes), displayPath(result.RootPath))
+			fmt.Printf("%s  %s  %s\n", formatDUSize(result.Total, duBytes), formatDUCount(result.Count), displayPath(result.RootPath))
 			return nil
 		}
 
 		for _, entry := range result.Entries {
-			fmt.Printf("%s  %s\n", formatDUSize(entry.Size, duBytes), displayPath(entry.Path))
+			fmt.Printf("%s  %s  %s\n", formatDUSize(entry.Size, duBytes), formatDUCount(entry.Count), displayPath(entry.Path))
 		}
-		fmt.Printf("%s  %s\n", formatDUSize(result.Total, duBytes), displayPath(result.RootPath))
+		if !duNoSummary {
+			fmt.Printf("%s  %s  %s\n", formatDUSize(result.Total, duBytes), formatDUCount(result.Count), displayPath(result.RootPath))
+		}
 
 		return nil
 	},
@@ -143,9 +152,38 @@ func formatDUSize(bytes int64, rawBytes bool) string {
 	return fmt.Sprintf("%10s", storage.FormatSize(bytes))
 }
 
+// formatDUCount formats a file count as a right-aligned column with thousands
+// separators for readability, e.g. "   12,341,243 files".
+// Width 13 accommodates up to 1,000,000,000 (1 billion) without overflow.
+func formatDUCount(count int64) string {
+	noun := "files"
+	if count == 1 {
+		noun = "file "
+	}
+	return fmt.Sprintf("%13s %s", formatThousands(count), noun)
+}
+
+// formatThousands inserts comma separators into an integer, e.g. 12341243 → "12,341,243".
+func formatThousands(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	b := []byte(s)
+	out := make([]byte, 0, len(b)+(len(b)-1)/3)
+	for i, c := range b {
+		if i > 0 && (len(b)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	return string(out)
+}
+
 func init() {
 	duCmd.Flags().BoolVarP(&duSummarize, "summarize", "s", false, "display only a total for each argument")
 	duCmd.Flags().BoolVarP(&duBytes, "bytes", "b", false, "print raw byte counts instead of human-readable sizes")
+	duCmd.Flags().BoolVar(&duNoSummary, "no-summary", false, "suppress the grand total line")
 
 	rootCmd.AddCommand(duCmd)
 }
