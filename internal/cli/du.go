@@ -24,6 +24,10 @@ var duCmd = &cobra.Command{
 Without -s, shows the size of each immediate subdirectory followed by the
 grand total. With -s, shows only the grand total.
 
+For wildcard paths, each matching entry is always shown as a per-match
+summary, followed by a grand total line (-s has no effect on the per-match
+lines since they are already summaries).
+
 Subdirectory sizes are calculated in parallel using SetAttrSelection to fetch
 only Name and Size, significantly reducing API payload and speeding up large
 bucket traversals. Parallelism is controlled by the global -j flag.
@@ -39,11 +43,12 @@ Examples:
   # Show only the grand total
   cio du -s :am/2024/
 
+  # Wildcard: per-match summaries + grand total
+  cio du "gs://bucket/prefix*/"
+  cio du -s "gs://bucket/prefix*/"
+
   # Show raw byte counts
   cio du --bytes :am/
-
-  # Increase parallelism for many subdirectories
-  cio du -j 16 :am/
 
 Note: parallelism is controlled by the global -j flag (default: 50).`,
 	Args: cobra.ExactArgs(1),
@@ -99,12 +104,11 @@ Note: parallelism is controlled by the global -j flag (default: 50).`,
 				}
 				return nil
 			}
+			// Each match is already a summary; always show them plus a grand total.
 			var total int64
 			for _, entry := range entries {
 				total += entry.Size
-				if !duSummarize {
-					fmt.Printf("%s  %s\n", formatDUSize(entry.Size, duBytes), displayPath(entry.Path))
-				}
+				fmt.Printf("%s  %s\n", formatDUSize(entry.Size, duBytes), displayPath(entry.Path))
 			}
 			fmt.Printf("%s  %s\n", formatDUSize(total, duBytes), displayPath(fullPath))
 			return nil
