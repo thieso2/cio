@@ -145,12 +145,21 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	// Expand the last segment across all active prefixes.
 	lastSeg := segments[len(segments)-1]
 	var results []*ObjectInfo
-	for _, prefix := range prefixes {
-		objs, err := listMatchingLastSegment(ctx, bucket, prefix, lastSeg, opts)
-		if err != nil {
-			return nil, err
+
+	// If the pattern ended with "/" the last segment is empty — the directories
+	// found during intermediate expansion ARE the results.
+	if lastSeg == "" {
+		for _, prefix := range prefixes {
+			results = append(results, CreatePrefixInfo(prefix, bucket))
 		}
-		results = append(results, objs...)
+	} else {
+		for _, prefix := range prefixes {
+			objs, err := listMatchingLastSegment(ctx, bucket, prefix, lastSeg, opts)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, objs...)
+		}
 	}
 
 	if opts.MaxResults > 0 && len(results) > opts.MaxResults {

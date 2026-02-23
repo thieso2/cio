@@ -79,34 +79,70 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 		formatter = DefaultPathFormatter
 	}
 
-	// Extract prefix and wildcard pattern
-	prefix, wildcardPattern := splitPattern(pattern)
-
-	// List all objects with the prefix
-	bkt := client.Bucket(bucket)
-	query := &storage.Query{
-		Prefix: prefix,
-	}
-
-	// First pass: collect all matching objects
 	var objectsToDelete []string
-	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
+
+	// Directory wildcard pattern (e.g. "logs/2024-??/"): the wildcard appears
+	// before the trailing slash, so splitPattern would produce an invalid GCS
+	// prefix containing wildcard characters.  Instead we use ListWithPattern to
+	// find the matching directory prefixes and then collect all objects inside.
+	isDirPattern := strings.HasSuffix(pattern, "/") && strings.ContainsAny(pattern, "*?")
+	if isDirPattern {
+		matchingDirs, err := ListWithPattern(ctx, bucket, pattern, DefaultListOptions())
 		if err != nil {
-			return fmt.Errorf("failed to list objects: %w", err)
+			return err
+		}
+		if len(matchingDirs) == 0 {
+			return fmt.Errorf("no directories found matching pattern: %s", pattern)
 		}
 
-		// Check if object matches the pattern
-		if !matchesPattern(attrs.Name, wildcardPattern) {
-			continue
+		bkt := client.Bucket(bucket)
+		for _, dir := range matchingDirs {
+			if !dir.IsPrefix {
+				continue
+			}
+			dirPrefix := strings.TrimPrefix(dir.Path, "gs://"+bucket+"/")
+			query := &storage.Query{Prefix: dirPrefix}
+			apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, dirPrefix)
+			it := bkt.Objects(ctx, query)
+			for {
+				attrs, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					return fmt.Errorf("failed to list objects in %s: %w", dirPrefix, err)
+				}
+				objectsToDelete = append(objectsToDelete, attrs.Name)
+			}
+		}
+	} else {
+		// Extract prefix and wildcard pattern
+		prefix, wildcardPattern := splitPattern(pattern)
+
+		// List all objects with the prefix
+		bkt := client.Bucket(bucket)
+		query := &storage.Query{
+			Prefix: prefix,
 		}
 
-		objectsToDelete = append(objectsToDelete, attrs.Name)
+		apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
+		it := bkt.Objects(ctx, query)
+		for {
+			attrs, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("failed to list objects: %w", err)
+			}
+
+			// Check if object matches the pattern
+			if !matchesPattern(attrs.Name, wildcardPattern) {
+				continue
+			}
+
+			objectsToDelete = append(objectsToDelete, attrs.Name)
+		}
 	}
 
 	totalCount := len(objectsToDelete)
@@ -114,7 +150,7 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 		return fmt.Errorf("no objects found matching pattern: %s", pattern)
 	}
 
-	// Second pass: delete in parallel with progress counter
+	// Delete in parallel with progress counter
 	return deleteObjectsParallel(ctx, client, bucket, objectsToDelete, totalCount, formatter, maxWorkers)
 }
 
