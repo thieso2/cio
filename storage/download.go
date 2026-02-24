@@ -501,20 +501,32 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 			// Ensure parent directory exists
 			dir := filepath.Dir(fileDownload.localFilePath)
 			if err := os.MkdirAll(dir, 0755); err != nil {
-				// GCS allows an object named "foo" alongside objects named "foo/bar",
-				// but a local filesystem cannot have both a file and a directory at
-				// the same path. Warn and skip instead of aborting the entire download.
 				if isPathConflictError(err) {
+					// A path component is a regular file instead of a directory.
+					// If it is a zero-byte GCS directory marker, remove it and
+					// retry so the real files underneath can be placed correctly.
+					if conflictPath := findConflictingFile(dir); conflictPath != "" {
+						if info, serr := os.Stat(conflictPath); serr == nil && info.Size() == 0 {
+							if rerr := os.Remove(conflictPath); rerr == nil {
+								if rerr2 := os.MkdirAll(dir, 0755); rerr2 == nil {
+									// Successfully converted marker → directory; continue download.
+									goto dirReady
+								}
+							}
+						}
+					}
+					// Real (non-empty) conflict — warn and skip.
 					downloads <- download{
 						fullGCSPath:   fileDownload.fullGCSPath,
 						localFilePath: fileDownload.localFilePath,
-						warning:       fmt.Sprintf("path conflict: %q exists as a file, cannot create as directory", dir),
+						warning:       fmt.Sprintf("path conflict: a non-empty file blocks directory creation for %q", dir),
 					}
 					return
 				}
 				downloads <- download{fullGCSPath: fileDownload.fullGCSPath, localFilePath: fileDownload.localFilePath, err: err}
 				return
 			}
+		dirReady:
 
 			// Create local file
 			file, err := os.Create(fileDownload.localFilePath)
@@ -582,11 +594,10 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 	return nil
 }
 
-// isPathConflictError reports whether err from os.MkdirAll is caused by a
-// path component already existing as a regular file (not a directory).
-// This happens when GCS has both "foo" (a file) and "foo/bar" (under a prefix)
-// which is legal in GCS but cannot be represented on a local filesystem.
-// macOS returns EEXIST, Linux returns ENOTDIR.
+// isPathConflictError reports whether err from os.MkdirAll / os.Create is
+// caused by a path component existing as the wrong type (file vs directory).
+// macOS returns EEXIST for mkdir-on-file, Linux returns ENOTDIR.
+// Both return EISDIR for create-on-directory.
 func isPathConflictError(err error) bool {
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
@@ -595,4 +606,27 @@ func isPathConflictError(err error) bool {
 			errors.Is(pathErr.Err, syscall.EISDIR)
 	}
 	return false
+}
+
+// findConflictingFile walks the components of dir from the root and returns
+// the first path component that exists as a regular file (not a directory).
+// Returns "" if no such component is found.
+func findConflictingFile(dir string) string {
+	parts := strings.Split(filepath.ToSlash(dir), "/")
+	path := ""
+	for _, part := range parts {
+		if path == "" {
+			path = part
+		} else {
+			path = path + "/" + part
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			return filepath.FromSlash(path)
+		}
+	}
+	return ""
 }
