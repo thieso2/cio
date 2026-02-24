@@ -384,10 +384,14 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 		return fmt.Errorf("failed to list objects: %w", err)
 	}
 
-	// Collect matching files (skip directory prefixes)
+	// Collect matching files (skip directory prefixes and directory-marker objects)
 	var filesToDownload []fileDownload
 	for _, obj := range matched {
 		if obj.IsPrefix {
+			continue
+		}
+		// Skip GCS directory-marker objects (real objects whose name ends with "/")
+		if strings.HasSuffix(obj.Path, "/") {
 			continue
 		}
 		objectName := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
