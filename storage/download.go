@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -432,6 +434,7 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 		localFilePath string
 		bytesWritten  int64
 		err           error
+		warning       string // non-fatal, e.g. GCS path conflict with local filesystem
 	}
 	downloads := make(chan download, totalCount)
 
@@ -441,7 +444,9 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 		for d := range downloads {
 			count := atomic.AddInt32(&completedCount, 1)
 
-			if d.err != nil {
+			if d.warning != "" {
+				fmt.Printf("Skipped %d/%d: %s (%s)\n", count, totalCount, formatter(d.fullGCSPath), d.warning)
+			} else if d.err != nil {
 				fmt.Printf("Failed %d/%d: %s - %v\n", count, totalCount, formatter(d.fullGCSPath), d.err)
 
 				// Store first error
@@ -479,6 +484,17 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 			// Ensure parent directory exists
 			dir := filepath.Dir(fileDownload.localFilePath)
 			if err := os.MkdirAll(dir, 0755); err != nil {
+				// GCS allows an object named "foo" alongside objects named "foo/bar",
+				// but a local filesystem cannot have both a file and a directory at
+				// the same path. Warn and skip instead of aborting the entire download.
+				if isPathConflictError(err) {
+					downloads <- download{
+						fullGCSPath:   fileDownload.fullGCSPath,
+						localFilePath: fileDownload.localFilePath,
+						warning:       fmt.Sprintf("path conflict: %q exists as a file, cannot create as directory", dir),
+					}
+					return
+				}
 				downloads <- download{fullGCSPath: fileDownload.fullGCSPath, localFilePath: fileDownload.localFilePath, err: err}
 				return
 			}
@@ -536,4 +552,17 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 		}
 	}
 	return nil
+}
+
+// isPathConflictError reports whether err from os.MkdirAll is caused by a
+// path component already existing as a regular file (not a directory).
+// This happens when GCS has both "foo" (a file) and "foo/bar" (under a prefix)
+// which is legal in GCS but cannot be represented on a local filesystem.
+// macOS returns EEXIST, Linux returns ENOTDIR.
+func isPathConflictError(err error) bool {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return errors.Is(pathErr.Err, syscall.EEXIST) || errors.Is(pathErr.Err, syscall.ENOTDIR)
+	}
+	return false
 }
