@@ -370,7 +370,10 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 
 	// Use ListWithPattern for level-by-level wildcard expansion (same as ls).
 	// This correctly handles wildcards in directory segments, e.g. "*/dumps/*schema*".
-	matched, err := ListWithPattern(ctx, bucket, pattern, &ListOptions{Recursive: false})
+	// When -r is set (PreserveStructure), recurse so that directory-matching segments
+	// expand into their full file contents (e.g. "gs://bucket/*" downloads everything).
+	recursive := opts != nil && opts.PreserveStructure
+	matched, err := ListWithPattern(ctx, bucket, pattern, &ListOptions{Recursive: recursive})
 	if err != nil {
 		return fmt.Errorf("failed to list objects: %w", err)
 	}
