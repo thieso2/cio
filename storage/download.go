@@ -502,6 +502,17 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 			// Create local file
 			file, err := os.Create(fileDownload.localFilePath)
 			if err != nil {
+				// The GCS object has the same name as a local directory created by
+				// a sibling object (e.g. GCS has both "iomb" and "iomb/cert.pem").
+				// Skip instead of aborting.
+				if isPathConflictError(err) {
+					downloads <- download{
+						fullGCSPath:   fileDownload.fullGCSPath,
+						localFilePath: fileDownload.localFilePath,
+						warning:       fmt.Sprintf("path conflict: %q exists as a directory, cannot create as file", fileDownload.localFilePath),
+					}
+					return
+				}
 				downloads <- download{fullGCSPath: fileDownload.fullGCSPath, localFilePath: fileDownload.localFilePath, err: err}
 				return
 			}
@@ -562,7 +573,9 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 func isPathConflictError(err error) bool {
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
-		return errors.Is(pathErr.Err, syscall.EEXIST) || errors.Is(pathErr.Err, syscall.ENOTDIR)
+		return errors.Is(pathErr.Err, syscall.EEXIST) ||
+			errors.Is(pathErr.Err, syscall.ENOTDIR) ||
+			errors.Is(pathErr.Err, syscall.EISDIR)
 	}
 	return false
 }
