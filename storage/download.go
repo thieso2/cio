@@ -33,6 +33,8 @@ type DownloadOptions struct {
 	MaxChunks int
 	// PreserveStructure preserves directory structure when downloading with wildcards
 	PreserveStructure bool
+	// Force skips the size-based existence check and always re-downloads
+	Force bool
 }
 
 // fileDownload represents a file to be downloaded
@@ -40,6 +42,7 @@ type fileDownload struct {
 	objectName    string
 	localFilePath string
 	fullGCSPath   string
+	size          int64 // GCS object size, used for skip-if-exists check
 }
 
 // chunkDownload represents a chunk of a file to be downloaded
@@ -346,6 +349,7 @@ func DownloadDirectory(ctx context.Context, client *storage.Client, bucket, pref
 			objectName:    attrs.Name,
 			localFilePath: localFilePath,
 			fullGCSPath:   fullGCSPath,
+			size:          attrs.Size,
 		})
 	}
 
@@ -401,6 +405,7 @@ func DownloadWithPattern(ctx context.Context, client *storage.Client, bucket, pa
 			objectName:    objectName,
 			localFilePath: localFilePath,
 			fullGCSPath:   obj.Path,
+			size:          obj.Size,
 		})
 	}
 
@@ -480,6 +485,18 @@ func downloadFilesParallel(ctx context.Context, client *storage.Client, bucket s
 		go func(fileDownload fileDownload) {
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore
+
+			// Skip if local file already exists with the correct size (unless Force).
+			if opts == nil || !opts.Force {
+				if info, err := os.Stat(fileDownload.localFilePath); err == nil && info.Size() == fileDownload.size {
+					downloads <- download{
+						fullGCSPath:   fileDownload.fullGCSPath,
+						localFilePath: fileDownload.localFilePath,
+						warning:       "skipped (already exists with correct size)",
+					}
+					return
+				}
+			}
 
 			// Ensure parent directory exists
 			dir := filepath.Dir(fileDownload.localFilePath)

@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	cpRecursive bool
+	cpRecursive  bool
+	cpForceCopy  bool
 )
 
 // cpCmd represents the cp command
@@ -57,6 +58,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(cpCmd)
 	cpCmd.Flags().BoolVarP(&cpRecursive, "recursive", "r", false, "copy directories recursively")
+	cpCmd.Flags().BoolVar(&cpForceCopy, "force-copy", false, "re-download even if destination file already exists with the correct size")
 }
 
 func runCp(cmd *cobra.Command, args []string) error {
@@ -185,6 +187,7 @@ func downloadPath(ctx context.Context, client *gcs.Client, r *resolver.Resolver,
 		ChunkSize:         cfg.Download.ChunkSize,
 		MaxChunks:         maxChunks,
 		PreserveStructure: cpRecursive, // Preserve directory structure when -r flag is used
+		Force:             cpForceCopy,
 	}
 
 	// Check if path contains wildcards
