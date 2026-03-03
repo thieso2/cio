@@ -90,8 +90,8 @@ func formatBQAccessAsJSON(entries []*bigquery.AccessEntry) ([]byte, error) {
 			ae.Entity = string(entry.Entity)
 		}
 
-		if string(entry.EntityType) != "" {
-			ae.EntityType = string(entry.EntityType)
+		if entry.EntityType != 0 {
+			ae.EntityType = bqEntityTypeString(entry.EntityType)
 		} else if entry.Entity != "" {
 			// Infer entity type from entity string
 			entityStr := string(entry.Entity)
@@ -121,6 +121,30 @@ func formatBQAccessAsJSON(entries []*bigquery.AccessEntry) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(result, "", "  ")
+}
+
+// bqEntityTypeString converts a BigQuery EntityType int to a descriptive string.
+func bqEntityTypeString(t bigquery.EntityType) string {
+	switch t {
+	case bigquery.UserEmailEntity:
+		return "user"
+	case bigquery.GroupEmailEntity:
+		return "group"
+	case bigquery.DomainEntity:
+		return "domain"
+	case bigquery.SpecialGroupEntity:
+		return "specialGroup"
+	case bigquery.ViewEntity:
+		return "view"
+	case bigquery.IAMMemberEntity:
+		return "iamMember"
+	case bigquery.RoutineEntity:
+		return "routine"
+	case bigquery.DatasetEntity:
+		return "dataset"
+	default:
+		return "unknown"
+	}
 }
 
 // extractGCSRoles extracts a map of roles to members from a GCS policy

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/thieso2/cio/bigquery"
 	"github.com/thieso2/cio/client"
 )
 
@@ -26,7 +27,7 @@ func Example_basic() {
 	}
 
 	for _, obj := range objects {
-		fmt.Printf("Object: %s (Size: %d bytes)\n", obj.Name, obj.Size)
+		fmt.Printf("Object: %s (Size: %d bytes)\n", obj.Path, obj.Size)
 	}
 }
 
@@ -52,7 +53,7 @@ func Example_withConfig() {
 	}
 
 	for _, table := range tables {
-		fmt.Printf("Table: %s\n", table.Name)
+		fmt.Printf("Table: %s\n", table.Path)
 	}
 }
 
@@ -74,7 +75,7 @@ func Example_aliasResolution() {
 	}
 
 	for _, obj := range objects {
-		fmt.Printf("Object: %s\n", obj.Name)
+		fmt.Printf("Object: %s\n", obj.Path)
 	}
 }
 
@@ -120,16 +121,17 @@ func Example_bigQueryOperations() {
 	}
 
 	for _, dataset := range datasets {
-		fmt.Printf("Dataset: %s\n", dataset.Name)
+		fmt.Printf("Dataset: %s\n", dataset.Path)
 
 		// List tables in each dataset
-		tables, err := c.BigQuery().ListTables(ctx, "my-project", dataset.Name)
+		_, datasetID, _, _ := bigquery.ParseBQPath(dataset.Path)
+		tables, err := c.BigQuery().ListTables(ctx, "my-project", datasetID)
 		if err != nil {
 			continue
 		}
 
 		for _, table := range tables {
-			fmt.Printf("  Table: %s\n", table.Name)
+			fmt.Printf("  Table: %s\n", table.Path)
 		}
 	}
 }
@@ -151,6 +153,6 @@ func Example_wildcards() {
 	}
 
 	for _, obj := range objects {
-		fmt.Printf("Log file: %s\n", obj.Name)
+		fmt.Printf("Log file: %s\n", obj.Path)
 	}
 }

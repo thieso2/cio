@@ -82,7 +82,7 @@ func New(opts ...Options) (*Client, error) {
 	}
 
 	// Create resolver
-	r := resolver.New(cfg)
+	r := resolver.Create(cfg)
 
 	return &Client{
 		config:   cfg,
@@ -166,7 +166,7 @@ func (s *StorageClient) List(ctx context.Context, path string) ([]*storage.Objec
 	}
 
 	// List objects
-	return storage.List(ctx, bucket, prefix)
+	return storage.List(ctx, bucket, prefix, nil)
 }
 
 // ListWithPattern lists objects matching a wildcard pattern.
@@ -183,7 +183,7 @@ func (s *StorageClient) ListWithPattern(ctx context.Context, pattern string) ([]
 		return nil, err
 	}
 
-	return storage.ListWithPattern(ctx, bucket, prefix)
+	return storage.ListWithPattern(ctx, bucket, prefix, nil)
 }
 
 // DownloadFile downloads a single file from GCS to a local path.
@@ -306,7 +306,7 @@ func (b *BigQueryClient) RemoveTable(ctx context.Context, projectID, datasetID, 
 	if projectID == "" {
 		projectID = b.config.Defaults.ProjectID
 	}
-	return bigquery.RemoveTable(ctx, projectID, datasetID, tableID)
+	return bigquery.RemoveTable(ctx, projectID, datasetID, tableID, nil)
 }
 
 // IAMClient provides methods for interacting with Google Cloud IAM.
