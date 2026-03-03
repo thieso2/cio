@@ -200,31 +200,72 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	return results, nil
 }
 
-// listParallelDoubleStarPattern fans out parallel recursive GCS listings from
-// each anchor prefix and filters the combined results by the ** suffix pattern.
-// Concurrency is capped at maxParallelRecursiveLists.
-func listParallelDoubleStarPattern(ctx context.Context, bucket string, prefixes []string, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
-	type prefixResult struct {
+// listParallelDoubleStarPattern implements the ** expansion pipeline:
+//
+//  1. Shallow-list each anchor prefix (non-recursive, delimiter="/") to discover
+//     its immediate children.  Files at this level are checked against the pattern
+//     directly; subdirectories become the work items for step 2.
+//
+//  2. Fan out a goroutine per discovered subdirectory (capped at
+//     maxParallelRecursiveLists concurrent), each doing a full recursive listing
+//     of its subtree and filtering matches against the pattern.  Paths are always
+//     matched relative to the original anchor prefix.
+//
+// This means `**.csv.zst` with a single anchor "" issues one cheap shallow list
+// first, then fans out one goroutine per top-level directory rather than issuing
+// a single giant recursive scan of the whole bucket.
+func listParallelDoubleStarPattern(ctx context.Context, bucket string, anchors []string, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
+	type subEntry struct{ sub, anchor string }
+	type chanResult struct {
 		objects []*ObjectInfo
 		err     error
 	}
 
-	n := len(prefixes)
-	results := make(chan prefixResult, n)
+	// Phase 1: shallow-list every anchor to find immediate files and subdirs.
+	var entries []subEntry
+	var combined []*ObjectInfo
+
+	for _, anchor := range anchors {
+		top, err := List(ctx, bucket, anchor, &ListOptions{
+			Recursive: false, Delimiter: "/",
+			LongFormat: opts.LongFormat, HumanReadable: opts.HumanReadable,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range top {
+			if obj.IsPrefix {
+				sub := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
+				entries = append(entries, subEntry{sub: sub, anchor: anchor})
+			} else {
+				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+anchor)
+				if doubleStarMatchPath(relPath, pattern) {
+					combined = append(combined, obj)
+				}
+			}
+		}
+	}
+
+	if len(entries) == 0 {
+		return combined, nil
+	}
+
+	// Phase 2: parallel recursive listings from each discovered subdirectory.
+	results := make(chan chanResult, len(entries))
 	sem := make(chan struct{}, maxParallelRecursiveLists)
 
-	for _, prefix := range prefixes {
-		go func(prefix string) {
+	for _, e := range entries {
+		go func(sub, anchor string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			all, err := List(ctx, bucket, prefix, &ListOptions{
+			all, err := List(ctx, bucket, sub, &ListOptions{
 				Recursive:     true,
 				LongFormat:    opts.LongFormat,
 				HumanReadable: opts.HumanReadable,
 			})
 			if err != nil {
-				results <- prefixResult{err: err}
+				results <- chanResult{err: err}
 				return
 			}
 
@@ -233,19 +274,20 @@ func listParallelDoubleStarPattern(ctx context.Context, bucket string, prefixes 
 				if obj.IsPrefix {
 					continue
 				}
-				// Match the path relative to the anchor prefix against the pattern.
-				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+prefix)
+				// Always match relative to the original anchor so the full
+				// relative path (e.g. "2024/jan/data.csv.zst") is tested against
+				// the pattern (e.g. "**.csv.zst").
+				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+anchor)
 				if doubleStarMatchPath(relPath, pattern) {
 					matched = append(matched, obj)
 				}
 			}
-			results <- prefixResult{objects: matched}
-		}(prefix)
+			results <- chanResult{objects: matched}
+		}(e.sub, e.anchor)
 	}
 
-	var combined []*ObjectInfo
 	var firstErr error
-	for range n {
+	for range len(entries) {
 		r := <-results
 		if r.err != nil && firstErr == nil {
 			firstErr = r.err
