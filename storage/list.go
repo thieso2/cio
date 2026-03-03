@@ -112,6 +112,11 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 		opts = DefaultListOptions()
 	}
 
+	// ** patterns require a recursive flat listing followed by full-path matching.
+	if strings.Contains(pattern, "**") {
+		return listWithDoubleStarPattern(ctx, bucket, pattern, opts)
+	}
+
 	segments := strings.Split(pattern, "/")
 
 	// Active GCS prefixes we are currently expanding.
@@ -242,6 +247,108 @@ func relSegmentName(bucket, prefix string, obj *ObjectInfo) string {
 	rel := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
 	name := strings.TrimPrefix(rel, prefix)
 	return strings.TrimSuffix(name, "/")
+}
+
+// listWithDoubleStarPattern handles patterns containing **.
+// It finds the constant prefix before the first ** segment, performs a full
+// recursive flat listing under that prefix, and filters results by matching
+// the full relative object path against the pattern (** crosses /, * does not).
+func listWithDoubleStarPattern(ctx context.Context, bucket, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
+	// Determine the constant GCS prefix: everything up to the last /
+	// that appears before the first **.
+	doubleStarIdx := strings.Index(pattern, "**")
+	constPrefix := ""
+	if doubleStarIdx > 0 {
+		if lastSlash := strings.LastIndex(pattern[:doubleStarIdx], "/"); lastSlash >= 0 {
+			constPrefix = pattern[:lastSlash+1]
+		}
+	}
+
+	all, err := List(ctx, bucket, constPrefix, &ListOptions{
+		Recursive:     true,
+		LongFormat:    opts.LongFormat,
+		HumanReadable: opts.HumanReadable,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*ObjectInfo
+	for _, obj := range all {
+		if obj.IsPrefix {
+			continue
+		}
+		relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
+		if doubleStarMatchPath(relPath, pattern) {
+			results = append(results, obj)
+		}
+	}
+
+	if opts.MaxResults > 0 && len(results) > opts.MaxResults {
+		results = results[:opts.MaxResults]
+	}
+	return results, nil
+}
+
+// doubleStarMatchPath matches a relative GCS object path against a glob pattern.
+//   - ** matches any sequence of characters including /
+//   - *  matches any sequence of characters except /
+//   - ?  matches any single character except /
+func doubleStarMatchPath(text, pattern string) bool {
+	if pattern == "" {
+		return text == ""
+	}
+	if len(pattern) >= 2 && pattern[0] == '*' && pattern[1] == '*' {
+		p := 2
+		for p < len(pattern) && pattern[p] == '*' {
+			p++
+		}
+		// **/ matches zero or more complete path segments
+		if p < len(pattern) && pattern[p] == '/' {
+			rest := pattern[p+1:]
+			if doubleStarMatchPath(text, rest) {
+				return true
+			}
+			for i := 0; i < len(text); i++ {
+				if text[i] == '/' {
+					if doubleStarMatchPath(text[i+1:], pattern) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		// ** not followed by /: matches zero or more characters including /
+		suffix := pattern[p:]
+		for i := 0; i <= len(text); i++ {
+			if doubleStarMatchPath(text[i:], suffix) {
+				return true
+			}
+		}
+		return false
+	}
+	if pattern[0] == '*' {
+		suffix := pattern[1:]
+		for i := 0; i <= len(text); i++ {
+			if i > 0 && text[i-1] == '/' {
+				return false
+			}
+			if doubleStarMatchPath(text[i:], suffix) {
+				return true
+			}
+		}
+		return false
+	}
+	if pattern[0] == '?' {
+		if len(text) == 0 || text[0] == '/' {
+			return false
+		}
+		return doubleStarMatchPath(text[1:], pattern[1:])
+	}
+	if len(text) == 0 || text[0] != pattern[0] {
+		return false
+	}
+	return doubleStarMatchPath(text[1:], pattern[1:])
 }
 
 // parseGCSPath parses a gs:// path into bucket and prefix

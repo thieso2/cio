@@ -9,6 +9,85 @@ func HasWildcard(path string) bool {
 	return strings.ContainsAny(path, "*?")
 }
 
+// HasDoubleStarWildcard checks if a path contains a ** wildcard (recursive glob).
+func HasDoubleStarWildcard(path string) bool {
+	return strings.Contains(path, "**")
+}
+
+// MatchDoubleStarPattern matches a path against a glob pattern where:
+//   - ** matches any sequence of characters including /
+//   - *  matches any sequence of characters except /
+//   - ?  matches any single character except /
+func MatchDoubleStarPattern(path, pattern string) bool {
+	return doubleStarMatch(path, pattern)
+}
+
+// doubleStarMatch is the recursive implementation for MatchDoubleStarPattern.
+func doubleStarMatch(text, pattern string) bool {
+	if pattern == "" {
+		return text == ""
+	}
+	// ** wildcard
+	if len(pattern) >= 2 && pattern[0] == '*' && pattern[1] == '*' {
+		// Skip all consecutive stars so *** is treated the same as **
+		p := 2
+		for p < len(pattern) && pattern[p] == '*' {
+			p++
+		}
+		// **/ means zero or more complete path segments (each ending with /).
+		// Try matching zero segments first (skip the **/ and match rest directly),
+		// then consume one segment at a time and re-apply **/ on the remainder.
+		if p < len(pattern) && pattern[p] == '/' {
+			rest := pattern[p+1:] // pattern after **/
+			if doubleStarMatch(text, rest) {
+				return true
+			}
+			for i := 0; i < len(text); i++ {
+				if text[i] == '/' {
+					// Re-apply the full **/rest against the text after this /
+					if doubleStarMatch(text[i+1:], pattern) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		// ** not followed by /: matches zero or more characters including /
+		suffix := pattern[p:]
+		for i := 0; i <= len(text); i++ {
+			if doubleStarMatch(text[i:], suffix) {
+				return true
+			}
+		}
+		return false
+	}
+	// Single * wildcard: matches any sequence of characters except /
+	if pattern[0] == '*' {
+		suffix := pattern[1:]
+		for i := 0; i <= len(text); i++ {
+			if i > 0 && text[i-1] == '/' {
+				return false
+			}
+			if doubleStarMatch(text[i:], suffix) {
+				return true
+			}
+		}
+		return false
+	}
+	// ? wildcard: matches any single character except /
+	if pattern[0] == '?' {
+		if len(text) == 0 || text[0] == '/' {
+			return false
+		}
+		return doubleStarMatch(text[1:], pattern[1:])
+	}
+	// Literal character
+	if len(text) == 0 || text[0] != pattern[0] {
+		return false
+	}
+	return doubleStarMatch(text[1:], pattern[1:])
+}
+
 // SplitWildcardPath splits a path into base path and wildcard pattern
 // Example: "am/logs/*.log" -> ("am/logs/", "*.log")
 func SplitWildcardPath(path string) (basePath, pattern string) {
