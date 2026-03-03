@@ -200,66 +200,29 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 	return results, nil
 }
 
-// listParallelDoubleStarPattern implements the ** expansion pipeline:
+// listParallelDoubleStarPattern issues one recursive GCS listing per anchor
+// prefix (letting the GCS API handle the recursion server-side via no delimiter)
+// and filters the results client-side against the ** pattern.
 //
-//  1. Shallow-list each anchor prefix (non-recursive, delimiter="/") to discover
-//     its immediate children.  Files at this level are checked against the pattern
-//     directly; subdirectories become the work items for step 2.
-//
-//  2. Fan out a goroutine per discovered subdirectory (capped at
-//     maxParallelRecursiveLists concurrent), each doing a full recursive listing
-//     of its subtree and filtering matches against the pattern.  Paths are always
-//     matched relative to the original anchor prefix.
-//
-// This means `**.csv.zst` with a single anchor "" issues one cheap shallow list
-// first, then fans out one goroutine per top-level directory rather than issuing
-// a single giant recursive scan of the whole bucket.
+// Anchors are listed in parallel, capped at maxParallelRecursiveLists goroutines.
+// For a single anchor (e.g. **.csv.zst → anchor "") this becomes one API call.
+// For multiple anchors (e.g. */exports/**.csv.zst → one anchor per matched dir)
+// the parallel goroutines provide real concurrency.
 func listParallelDoubleStarPattern(ctx context.Context, bucket string, anchors []string, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
-	type subEntry struct{ sub, anchor string }
 	type chanResult struct {
 		objects []*ObjectInfo
 		err     error
 	}
 
-	// Phase 1: shallow-list every anchor to find immediate files and subdirs.
-	var entries []subEntry
-	var combined []*ObjectInfo
-
-	for _, anchor := range anchors {
-		top, err := List(ctx, bucket, anchor, &ListOptions{
-			Recursive: false, Delimiter: "/",
-			LongFormat: opts.LongFormat, HumanReadable: opts.HumanReadable,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, obj := range top {
-			if obj.IsPrefix {
-				sub := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
-				entries = append(entries, subEntry{sub: sub, anchor: anchor})
-			} else {
-				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+anchor)
-				if doubleStarMatchPath(relPath, pattern) {
-					combined = append(combined, obj)
-				}
-			}
-		}
-	}
-
-	if len(entries) == 0 {
-		return combined, nil
-	}
-
-	// Phase 2: parallel recursive listings from each discovered subdirectory.
-	results := make(chan chanResult, len(entries))
+	results := make(chan chanResult, len(anchors))
 	sem := make(chan struct{}, maxParallelRecursiveLists)
 
-	for _, e := range entries {
-		go func(sub, anchor string) {
+	for _, anchor := range anchors {
+		go func(anchor string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			all, err := List(ctx, bucket, sub, &ListOptions{
+			all, err := List(ctx, bucket, anchor, &ListOptions{
 				Recursive:     true,
 				LongFormat:    opts.LongFormat,
 				HumanReadable: opts.HumanReadable,
@@ -274,20 +237,18 @@ func listParallelDoubleStarPattern(ctx context.Context, bucket string, anchors [
 				if obj.IsPrefix {
 					continue
 				}
-				// Always match relative to the original anchor so the full
-				// relative path (e.g. "2024/jan/data.csv.zst") is tested against
-				// the pattern (e.g. "**.csv.zst").
 				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+anchor)
 				if doubleStarMatchPath(relPath, pattern) {
 					matched = append(matched, obj)
 				}
 			}
 			results <- chanResult{objects: matched}
-		}(e.sub, e.anchor)
+		}(anchor)
 	}
 
+	var combined []*ObjectInfo
 	var firstErr error
-	for range len(entries) {
+	for range len(anchors) {
 		r := <-results
 		if r.err != nil && firstErr == nil {
 			firstErr = r.err
