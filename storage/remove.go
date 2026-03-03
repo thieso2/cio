@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/thieso2/cio/apilog"
@@ -17,6 +18,20 @@ const (
 	// DefaultConcurrentDeletes is the default number of concurrent delete operations
 	DefaultConcurrentDeletes = 50
 )
+
+// formatSize returns a human-readable byte size string.
+func formatSize(bytes int64) string {
+	switch {
+	case bytes >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/(1<<30))
+	case bytes >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/(1<<20))
+	case bytes >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
 
 // RemoveObject removes a single object from GCS
 func RemoveObject(ctx context.Context, client *storage.Client, bucket, object string, verbose bool, formatter PathFormatter) error {
@@ -32,99 +47,20 @@ func RemoveObject(ctx context.Context, client *storage.Client, bucket, object st
 		return fmt.Errorf("failed to delete object: %w", err)
 	}
 
-	// Always log deletions
 	fmt.Printf("Deleted: %s\n", formatter(fullGCSPath))
 	return nil
 }
 
-// RemoveDirectory removes all objects with a given prefix
+// RemoveDirectory removes all objects with a given prefix.
+// Enumeration and deletion run concurrently via a worker pool.
 func RemoveDirectory(ctx context.Context, client *storage.Client, bucket, prefix string, verbose bool, formatter PathFormatter, maxWorkers int) error {
 	if formatter == nil {
 		formatter = DefaultPathFormatter
 	}
 
-	// List all objects with the prefix first to get total count
-	bkt := client.Bucket(bucket)
-	query := &storage.Query{
-		Prefix: prefix,
-	}
-
-	// First pass: collect all objects to delete
-	var objectsToDelete []string
-	apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
-	it := bkt.Objects(ctx, query)
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to list objects: %w", err)
-		}
-		objectsToDelete = append(objectsToDelete, attrs.Name)
-	}
-
-	totalCount := len(objectsToDelete)
-	if totalCount == 0 {
-		return fmt.Errorf("no objects found with prefix gs://%s/%s", bucket, prefix)
-	}
-
-	// Second pass: delete in parallel with progress counter
-	return deleteObjectsParallel(ctx, client, bucket, objectsToDelete, totalCount, formatter, maxWorkers)
-}
-
-// RemoveWithPattern removes objects matching a wildcard pattern
-func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, pattern string, verbose bool, formatter PathFormatter, maxWorkers int) error {
-	if formatter == nil {
-		formatter = DefaultPathFormatter
-	}
-
-	var objectsToDelete []string
-
-	// Directory wildcard pattern (e.g. "logs/2024-??/"): the wildcard appears
-	// before the trailing slash, so splitPattern would produce an invalid GCS
-	// prefix containing wildcard characters.  Instead we use ListWithPattern to
-	// find the matching directory prefixes and then collect all objects inside.
-	isDirPattern := strings.HasSuffix(pattern, "/") && strings.ContainsAny(pattern, "*?")
-	if isDirPattern {
-		matchingDirs, err := ListWithPattern(ctx, bucket, pattern, DefaultListOptions())
-		if err != nil {
-			return err
-		}
-		if len(matchingDirs) == 0 {
-			return fmt.Errorf("no directories found matching pattern: %s", pattern)
-		}
-
+	enumerate := func(ctx context.Context, send func(name string, size int64)) error {
 		bkt := client.Bucket(bucket)
-		for _, dir := range matchingDirs {
-			if !dir.IsPrefix {
-				continue
-			}
-			dirPrefix := strings.TrimPrefix(dir.Path, "gs://"+bucket+"/")
-			query := &storage.Query{Prefix: dirPrefix}
-			apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, dirPrefix)
-			it := bkt.Objects(ctx, query)
-			for {
-				attrs, err := it.Next()
-				if err == iterator.Done {
-					break
-				}
-				if err != nil {
-					return fmt.Errorf("failed to list objects in %s: %w", dirPrefix, err)
-				}
-				objectsToDelete = append(objectsToDelete, attrs.Name)
-			}
-		}
-	} else {
-		// Extract prefix and wildcard pattern
-		prefix, wildcardPattern := splitPattern(pattern)
-
-		// List all objects with the prefix
-		bkt := client.Bucket(bucket)
-		query := &storage.Query{
-			Prefix: prefix,
-		}
-
+		query := &storage.Query{Prefix: prefix}
 		apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
 		it := bkt.Objects(ctx, query)
 		for {
@@ -135,99 +71,234 @@ func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, patt
 			if err != nil {
 				return fmt.Errorf("failed to list objects: %w", err)
 			}
-
-			// Check if object matches the pattern
-			if !matchesPattern(attrs.Name, wildcardPattern) {
-				continue
-			}
-
-			objectsToDelete = append(objectsToDelete, attrs.Name)
+			send(attrs.Name, attrs.Size)
 		}
+		return nil
 	}
 
-	totalCount := len(objectsToDelete)
-	if totalCount == 0 {
-		return fmt.Errorf("no objects found matching pattern: %s", pattern)
-	}
-
-	// Delete in parallel with progress counter
-	return deleteObjectsParallel(ctx, client, bucket, objectsToDelete, totalCount, formatter, maxWorkers)
+	return deleteObjectsStream(ctx, client, bucket, enumerate,
+		fmt.Sprintf("no objects found with prefix gs://%s/%s", bucket, prefix),
+		formatter, maxWorkers)
 }
 
-// deleteObjectsParallel deletes objects in parallel with controlled concurrency
-func deleteObjectsParallel(ctx context.Context, client *storage.Client, bucket string, objectsToDelete []string, totalCount int, formatter PathFormatter, maxWorkers int) error {
-	// Create a semaphore to limit concurrent deletes
-	sem := make(chan struct{}, maxWorkers)
+// RemoveWithPattern removes objects matching a wildcard pattern.
+// Enumeration and deletion run concurrently via a worker pool.
+func RemoveWithPattern(ctx context.Context, client *storage.Client, bucket, pattern string, verbose bool, formatter PathFormatter, maxWorkers int) error {
+	if formatter == nil {
+		formatter = DefaultPathFormatter
+	}
+
+	// Directory wildcard pattern (e.g. "logs/2024-??/"): wildcards appear before
+	// the trailing slash, so splitPattern would produce an invalid GCS prefix.
+	// Instead we use ListWithPattern to find matching directory prefixes first.
+	isDirPattern := strings.HasSuffix(pattern, "/") && strings.ContainsAny(pattern, "*?")
+
+	enumerate := func(ctx context.Context, send func(name string, size int64)) error {
+		if isDirPattern {
+			matchingDirs, err := ListWithPattern(ctx, bucket, pattern, DefaultListOptions())
+			if err != nil {
+				return err
+			}
+			if len(matchingDirs) == 0 {
+				return fmt.Errorf("no directories found matching pattern: %s", pattern)
+			}
+			bkt := client.Bucket(bucket)
+			for _, dir := range matchingDirs {
+				if !dir.IsPrefix {
+					continue
+				}
+				dirPrefix := strings.TrimPrefix(dir.Path, "gs://"+bucket+"/")
+				query := &storage.Query{Prefix: dirPrefix}
+				apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, dirPrefix)
+				it := bkt.Objects(ctx, query)
+				for {
+					attrs, err := it.Next()
+					if err == iterator.Done {
+						break
+					}
+					if err != nil {
+						return fmt.Errorf("failed to list objects in %s: %w", dirPrefix, err)
+					}
+					send(attrs.Name, attrs.Size)
+				}
+			}
+		} else {
+			prefix, wildcardPattern := splitPattern(pattern)
+			bkt := client.Bucket(bucket)
+			query := &storage.Query{Prefix: prefix}
+			apilog.Logf("[GCS] Objects.List(bucket=%s, prefix=%q) for delete", bucket, prefix)
+			it := bkt.Objects(ctx, query)
+			for {
+				attrs, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					return fmt.Errorf("failed to list objects: %w", err)
+				}
+				if !matchesPattern(attrs.Name, wildcardPattern) {
+					continue
+				}
+				send(attrs.Name, attrs.Size)
+			}
+		}
+		return nil
+	}
+
+	return deleteObjectsStream(ctx, client, bucket, enumerate,
+		fmt.Sprintf("no objects found matching pattern: %s", pattern),
+		formatter, maxWorkers)
+}
+
+// workItem carries the object name and its byte size through the delete pipeline.
+type workItem struct {
+	name string
+	size int64
+}
+
+// deleteObjectsStream runs enumeration concurrently with a fixed worker pool.
+// enumerate calls send() for each object (name + size) to delete;
+// deleteObjectsStream manages the worker goroutines, progress reporting, and
+// error collection.
+// notFoundMsg is returned when enumerate completes with zero objects sent.
+func deleteObjectsStream(
+	ctx context.Context,
+	client *storage.Client,
+	bucket string,
+	enumerate func(ctx context.Context, send func(name string, size int64)) error,
+	notFoundMsg string,
+	formatter PathFormatter,
+	maxWorkers int,
+) error {
+	workCh := make(chan workItem, maxWorkers*4)
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
+	var enumErr error
 	var completedCount int32
+	var failedCount int32
+	var enumeratedCount int32
+	var enumDone int32
+	var lastPath string
+	var completedBytes int64
+	var enumeratedBytes int64
 
-	// Channel for completed deletions (for progress tracking)
-	type deletion struct {
-		objectName string
-		err        error
-	}
-	deletions := make(chan deletion, totalCount)
-
-	// Start progress reporter goroutine
-	done := make(chan struct{})
-	go func() {
-		for d := range deletions {
-			count := atomic.AddInt32(&completedCount, 1)
-
-			if d.err != nil {
-				fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, d.objectName)
-				fmt.Printf("Failed %d/%d: %s - %v\n", count, totalCount, formatter(fullGCSPath), d.err)
-
-				// Store first error
+	// Fixed worker pool: workers drain workCh until it is closed.
+	bkt := client.Bucket(bucket)
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range workCh {
+				err := bkt.Object(item.name).Delete(ctx)
+				atomic.AddInt32(&completedCount, 1)
+				atomic.AddInt64(&completedBytes, item.size)
 				mu.Lock()
-				if firstErr == nil {
-					firstErr = d.err
+				lastPath = item.name
+				if err != nil {
+					atomic.AddInt32(&failedCount, 1)
+					if firstErr == nil {
+						firstErr = err
+					}
 				}
 				mu.Unlock()
+			}
+		}()
+	}
+
+	// Progress reporter: one \r line updated every 200ms.
+	stop := make(chan struct{})
+	reporterDone := make(chan struct{})
+	printProgress := func(final bool) {
+		deleted := atomic.LoadInt32(&completedCount)
+		enumed := atomic.LoadInt32(&enumeratedCount)
+		failed := atomic.LoadInt32(&failedCount)
+		delBytes := atomic.LoadInt64(&completedBytes)
+		enumBytes := atomic.LoadInt64(&enumeratedBytes)
+		done := atomic.LoadInt32(&enumDone) == 1
+		mu.Lock()
+		path := lastPath
+		mu.Unlock()
+		if path == "" {
+			return
+		}
+		fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, path)
+		suffix := "\r"
+		if final {
+			suffix = "\n"
+		}
+		if done {
+			if failed > 0 {
+				fmt.Printf("\rDeleted %d/%d (%s/%s, %d failed): %s%s",
+					deleted, enumed, formatSize(delBytes), formatSize(enumBytes), failed, formatter(fullGCSPath), suffix)
 			} else {
-				fullGCSPath := fmt.Sprintf("gs://%s/%s", bucket, d.objectName)
-				fmt.Printf("Deleted %d/%d: %s\n", count, totalCount, formatter(fullGCSPath))
+				fmt.Printf("\rDeleted %d/%d (%s/%s): %s%s",
+					deleted, enumed, formatSize(delBytes), formatSize(enumBytes), formatter(fullGCSPath), suffix)
+			}
+		} else {
+			if failed > 0 {
+				fmt.Printf("\rDeleted %d (%s) found %d (%s), %d failed: %s%s",
+					deleted, formatSize(delBytes), enumed, formatSize(enumBytes), failed, formatter(fullGCSPath), suffix)
+			} else {
+				fmt.Printf("\rDeleted %d (%s) found %d (%s): %s%s",
+					deleted, formatSize(delBytes), enumed, formatSize(enumBytes), formatter(fullGCSPath), suffix)
 			}
 		}
-		close(done)
+	}
+	go func() {
+		defer close(reporterDone)
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				printProgress(false)
+			case <-stop:
+				return
+			}
+		}
 	}()
 
-	// Delete objects in parallel
-	bkt := client.Bucket(bucket)
-	for _, objectName := range objectsToDelete {
-		wg.Add(1)
+	// Enumeration goroutine: feeds workCh; closing it signals workers to exit.
+	go func() {
+		defer close(workCh)
+		err := enumerate(ctx, func(name string, size int64) {
+			workCh <- workItem{name: name, size: size}
+			atomic.AddInt32(&enumeratedCount, 1)
+			atomic.AddInt64(&enumeratedBytes, size)
+		})
+		mu.Lock()
+		enumErr = err
+		mu.Unlock()
+		atomic.StoreInt32(&enumDone, 1)
+	}()
 
-		// Acquire semaphore
-		sem <- struct{}{}
-
-		go func(objName string) {
-			defer wg.Done()
-			defer func() { <-sem }() // Release semaphore
-
-			// Delete the object
-			obj := bkt.Object(objName)
-			err := obj.Delete(ctx)
-
-			// Send result to progress reporter
-			deletions <- deletion{objectName: objName, err: err}
-		}(objectName)
-	}
-
-	// Wait for all deletions to complete
 	wg.Wait()
-	close(deletions)
+	close(stop)
+	<-reporterDone
 
-	// Wait for progress reporter to finish
-	<-done
+	printProgress(true)
 
-	if firstErr != nil {
-		return fmt.Errorf("deletion failed: %w", firstErr)
+	mu.Lock()
+	eerr := enumErr
+	derr := firstErr
+	mu.Unlock()
+
+	if eerr != nil {
+		return eerr
+	}
+	if atomic.LoadInt32(&enumeratedCount) == 0 {
+		return fmt.Errorf("%s", notFoundMsg)
+	}
+	if derr != nil {
+		return fmt.Errorf("deletion failed: %w", derr)
 	}
 
-	if totalCount > 1 {
-		fmt.Printf("\nTotal: %d objects deleted\n", totalCount)
+	deleted := atomic.LoadInt32(&completedCount)
+	delBytes := atomic.LoadInt64(&completedBytes)
+	if deleted > 1 {
+		fmt.Printf("Total: %d objects deleted (%s)\n", deleted, formatSize(delBytes))
 	}
 	return nil
 }
