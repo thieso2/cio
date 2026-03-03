@@ -98,32 +98,53 @@ func ListByPath(ctx context.Context, gcsPath string, opts *ListOptions) ([]*Obje
 	return List(ctx, bucket, prefix, opts)
 }
 
+// maxParallelRecursiveLists is the maximum number of concurrent recursive GCS
+// listing calls issued when expanding a ** wildcard pattern.
+const maxParallelRecursiveLists = 8
+
 // ListWithPattern lists objects matching a wildcard pattern using level-by-level
 // expansion. The pattern is split into '/' segments and expanded one level at a
 // time, so only directories that can possibly match are traversed.
 //
+// Patterns containing ** are handled in two phases:
+//  1. Level-by-level expansion for all segments before the first ** segment.
+//  2. Parallel recursive listings from each resulting anchor prefix, filtered
+//     by the ** suffix pattern.
+//
 // Examples:
 //
-//	"*/dumps/*schema*"   – lists top-level dirs, descends into <x>/dumps/, filters
-//	"logs/2024/*.log"    – constant prefix collapsed, single-level filter at the end
-//	"2024/*/data.csv"    – lists 2024/ sub-dirs, then checks for exact data.csv
+//	"*/dumps/*schema*"      – lists top-level dirs, descends into <x>/dumps/, filters
+//	"logs/2024/*.log"       – constant prefix collapsed, single-level filter at the end
+//	"2024/*/data.csv"       – lists 2024/ sub-dirs, then checks for exact data.csv
+//	"**.csv.zst"            – parallel recursive from root, matches any depth
+//	"*/exports/**.csv.zst"  – expands top-level dirs, then parallel recursive per dir
 func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
 	if opts == nil {
 		opts = DefaultListOptions()
 	}
 
-	// ** patterns require a recursive flat listing followed by full-path matching.
-	if strings.Contains(pattern, "**") {
-		return listWithDoubleStarPattern(ctx, bucket, pattern, opts)
+	segments := strings.Split(pattern, "/")
+
+	// Find the first segment that contains **.
+	doubleStarIdx := -1
+	for i, seg := range segments {
+		if strings.Contains(seg, "**") {
+			doubleStarIdx = i
+			break
+		}
 	}
 
-	segments := strings.Split(pattern, "/")
+	// For ** patterns, level-by-level expansion stops at the ** segment.
+	// For single-* patterns, it stops before the last segment.
+	expandUntil := len(segments) - 1
+	if doubleStarIdx != -1 {
+		expandUntil = doubleStarIdx
+	}
 
 	// Active GCS prefixes we are currently expanding.
 	prefixes := []string{""}
 
-	// Expand all segments except the last one.
-	for _, seg := range segments[:len(segments)-1] {
+	for _, seg := range segments[:expandUntil] {
 		if !strings.ContainsAny(seg, "*?") {
 			// Constant segment: fold directly into every prefix – no API call.
 			for i := range prefixes {
@@ -147,7 +168,13 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 		}
 	}
 
-	// Expand the last segment across all active prefixes.
+	// ** path: fan out parallel recursive listings from each anchor prefix.
+	if doubleStarIdx != -1 {
+		suffixPattern := strings.Join(segments[doubleStarIdx:], "/")
+		return listParallelDoubleStarPattern(ctx, bucket, prefixes, suffixPattern, opts)
+	}
+
+	// Single-* path: expand the last segment across all active prefixes.
 	lastSeg := segments[len(segments)-1]
 	var results []*ObjectInfo
 
@@ -171,6 +198,68 @@ func ListWithPattern(ctx context.Context, bucket, pattern string, opts *ListOpti
 		results = results[:opts.MaxResults]
 	}
 	return results, nil
+}
+
+// listParallelDoubleStarPattern fans out parallel recursive GCS listings from
+// each anchor prefix and filters the combined results by the ** suffix pattern.
+// Concurrency is capped at maxParallelRecursiveLists.
+func listParallelDoubleStarPattern(ctx context.Context, bucket string, prefixes []string, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
+	type prefixResult struct {
+		objects []*ObjectInfo
+		err     error
+	}
+
+	n := len(prefixes)
+	results := make(chan prefixResult, n)
+	sem := make(chan struct{}, maxParallelRecursiveLists)
+
+	for _, prefix := range prefixes {
+		go func(prefix string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			all, err := List(ctx, bucket, prefix, &ListOptions{
+				Recursive:     true,
+				LongFormat:    opts.LongFormat,
+				HumanReadable: opts.HumanReadable,
+			})
+			if err != nil {
+				results <- prefixResult{err: err}
+				return
+			}
+
+			var matched []*ObjectInfo
+			for _, obj := range all {
+				if obj.IsPrefix {
+					continue
+				}
+				// Match the path relative to the anchor prefix against the pattern.
+				relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/"+prefix)
+				if doubleStarMatchPath(relPath, pattern) {
+					matched = append(matched, obj)
+				}
+			}
+			results <- prefixResult{objects: matched}
+		}(prefix)
+	}
+
+	var combined []*ObjectInfo
+	var firstErr error
+	for range n {
+		r := <-results
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+		combined = append(combined, r.objects...)
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	if opts.MaxResults > 0 && len(combined) > opts.MaxResults {
+		combined = combined[:opts.MaxResults]
+	}
+	return combined, nil
 }
 
 // listDirsMatchingSegment lists one level below prefix (non-recursive) and
@@ -247,47 +336,6 @@ func relSegmentName(bucket, prefix string, obj *ObjectInfo) string {
 	rel := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
 	name := strings.TrimPrefix(rel, prefix)
 	return strings.TrimSuffix(name, "/")
-}
-
-// listWithDoubleStarPattern handles patterns containing **.
-// It finds the constant prefix before the first ** segment, performs a full
-// recursive flat listing under that prefix, and filters results by matching
-// the full relative object path against the pattern (** crosses /, * does not).
-func listWithDoubleStarPattern(ctx context.Context, bucket, pattern string, opts *ListOptions) ([]*ObjectInfo, error) {
-	// Determine the constant GCS prefix: everything up to the last /
-	// that appears before the first **.
-	doubleStarIdx := strings.Index(pattern, "**")
-	constPrefix := ""
-	if doubleStarIdx > 0 {
-		if lastSlash := strings.LastIndex(pattern[:doubleStarIdx], "/"); lastSlash >= 0 {
-			constPrefix = pattern[:lastSlash+1]
-		}
-	}
-
-	all, err := List(ctx, bucket, constPrefix, &ListOptions{
-		Recursive:     true,
-		LongFormat:    opts.LongFormat,
-		HumanReadable: opts.HumanReadable,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var results []*ObjectInfo
-	for _, obj := range all {
-		if obj.IsPrefix {
-			continue
-		}
-		relPath := strings.TrimPrefix(obj.Path, "gs://"+bucket+"/")
-		if doubleStarMatchPath(relPath, pattern) {
-			results = append(results, obj)
-		}
-	}
-
-	if opts.MaxResults > 0 && len(results) > opts.MaxResults {
-		results = results[:opts.MaxResults]
-	}
-	return results, nil
 }
 
 // doubleStarMatchPath matches a relative GCS object path against a glob pattern.
