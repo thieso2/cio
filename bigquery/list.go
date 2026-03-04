@@ -3,7 +3,9 @@ package bigquery
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -226,7 +228,9 @@ func ListDatasets(ctx context.Context, projectID string) ([]*BQObjectInfo, error
 	return results, nil
 }
 
-// ListTables lists all tables in a dataset
+const metadataWorkers = 8
+
+// ListTables lists all tables in a dataset, fetching metadata in parallel.
 func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectInfo, error) {
 	client, err := GetClient(ctx, projectID)
 	if err != nil {
@@ -234,10 +238,14 @@ func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectIn
 	}
 
 	dataset := client.Dataset(datasetID)
-	var results []*BQObjectInfo
 	apilog.Logf("[BQ] Tables.List(project=%s, dataset=%s)", projectID, datasetID)
 	it := dataset.Tables(ctx)
 
+	// Collect all table handles first (fast — no API call per table).
+	type tableHandle struct {
+		table *bigquery.Table
+	}
+	var handles []tableHandle
 	for {
 		table, err := it.Next()
 		if err == iterator.Done {
@@ -246,28 +254,71 @@ func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectIn
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate tables: %w", err)
 		}
-
-		// Get table metadata
-		apilog.Logf("[BQ] Table.Metadata(project=%s, dataset=%s, table=%s)", projectID, datasetID, table.TableID)
-		meta, err := table.Metadata(ctx)
-		if err != nil {
-			// Skip tables we can't access
-			continue
-		}
-
-		results = append(results, &BQObjectInfo{
-			Path:        fmt.Sprintf("bq://%s.%s.%s", projectID, datasetID, table.TableID),
-			Type:        "table",
-			Created:     meta.CreationTime,
-			Modified:    meta.LastModifiedTime,
-			Description: meta.Description,
-			Location:    meta.Location,
-			SizeBytes:   meta.NumBytes,
-			NumRows:     int64(meta.NumRows),
-		})
+		handles = append(handles, tableHandle{table: table})
 	}
 
-	return results, nil
+	// Fan-out: fetch metadata in parallel with a bounded worker pool.
+	type result struct {
+		info *BQObjectInfo
+	}
+
+	jobs := make(chan tableHandle, len(handles))
+	results := make(chan result, len(handles))
+
+	workers := metadataWorkers
+	if len(handles) < workers {
+		workers = len(handles)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for h := range jobs {
+				apilog.Logf("[BQ] Table.Metadata(project=%s, dataset=%s, table=%s)", projectID, datasetID, h.table.TableID)
+				meta, err := h.table.Metadata(ctx)
+				if err != nil {
+					// Skip tables we can't access.
+					continue
+				}
+				results <- result{
+					info: &BQObjectInfo{
+						Path:        fmt.Sprintf("bq://%s.%s.%s", projectID, datasetID, h.table.TableID),
+						Type:        "table",
+						Created:     meta.CreationTime,
+						Modified:    meta.LastModifiedTime,
+						Description: meta.Description,
+						Location:    meta.Location,
+						SizeBytes:   meta.NumBytes,
+						NumRows:     int64(meta.NumRows),
+					},
+				}
+			}
+		}()
+	}
+
+	for _, h := range handles {
+		jobs <- h
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var infos []*BQObjectInfo
+	for r := range results {
+		infos = append(infos, r.info)
+	}
+
+	// Sort by path to keep output deterministic.
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Path < infos[j].Path
+	})
+
+	return infos, nil
 }
 
 // DescribeTable shows table schema and details
