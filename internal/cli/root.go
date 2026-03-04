@@ -87,9 +87,11 @@ Examples:
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		// Override config with flags if provided
+		// Override config with flags if provided, then env vars
 		if projectID != "" {
 			cfg.Defaults.ProjectID = projectID
+		} else if envProject := os.Getenv("PROJECT_ID"); envProject != "" {
+			cfg.Defaults.ProjectID = envProject
 		}
 		if region != "" {
 			cfg.Defaults.Region = region

@@ -75,6 +75,9 @@ func LogFilter(projectID, region, scheme, name, execution string, audit bool) st
 		if name != "" {
 			parts = append(parts, fmt.Sprintf(`resource.labels.service_name="%s"`, name))
 		}
+		if region != "" {
+			parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
+		}
 		if !audit {
 			parts = append(parts, `NOT log_name:"cloudaudit"`)
 		} else {
