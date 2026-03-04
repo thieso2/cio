@@ -130,6 +130,10 @@ func runTail(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Filter: %s\n", filter)
 	}
 
+	// Single formatter shared by historical print and live stream so column
+	// widths accumulated during history are preserved in streaming mode.
+	f := cloudrun.NewLogFormatter(logPrefix, fixedPrefix)
+
 	ctx := context.Background()
 
 	// Fetch historical lines: n lines per job when wildcard was expanded,
@@ -143,7 +147,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	cloudrun.PrintLogs(entries, logPrefix, fixedPrefix)
+	cloudrun.PrintLogs(entries, f)
 
 	if !tailFollow {
 		if len(entries) == 0 {
@@ -152,7 +156,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Then stream live
+	// Then stream live using the same formatter.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -165,7 +169,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	return cloudrun.StreamLogs(ctx, projectID, filter, logPrefix, fixedPrefix)
+	return cloudrun.StreamLogs(ctx, projectID, filter, f)
 }
 
 // parseTailPath splits a Cloud Run path into (scheme, name, execution).

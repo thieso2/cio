@@ -156,9 +156,8 @@ func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames [
 }
 
 // StreamLogs streams live log entries to stdout using gRPC TailLogEntries.
-// Blocks until ctx is cancelled.
-// When fixedPrefix is true, the prefix label is always shown as-is (no label extraction).
-func StreamLogs(ctx context.Context, projectID, filter, prefix string, fixedPrefix bool) error {
+// Blocks until ctx is cancelled. f is the shared formatter (preserves column widths).
+func StreamLogs(ctx context.Context, projectID, filter string, f *LogFormatter) error {
 	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/logging.read")
 	if err != nil {
 		return fmt.Errorf("getting credentials: %w", err)
@@ -193,7 +192,6 @@ func StreamLogs(ctx context.Context, projectID, filter, prefix string, fixedPref
 	}
 
 	fmt.Fprintf(os.Stderr, "Streaming logs... (Ctrl+C to stop)\n")
-	f := NewLogFormatter(prefix, fixedPrefix)
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -208,10 +206,8 @@ func StreamLogs(ctx context.Context, projectID, filter, prefix string, fixedPref
 	}
 }
 
-// PrintLogs prints log entries to stdout with an optional prefix label.
-// When fixedPrefix is true, the prefix label is always shown as-is (no label extraction).
-func PrintLogs(entries []*logging.Entry, prefix string, fixedPrefix bool) {
-	f := NewLogFormatter(prefix, fixedPrefix)
+// PrintLogs prints log entries to stdout using the provided formatter.
+func PrintLogs(entries []*logging.Entry, f *LogFormatter) {
 	for _, e := range entries {
 		f.PrintEntry(os.Stdout, e)
 	}
