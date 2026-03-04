@@ -42,11 +42,9 @@ func LogFilterMultiJob(region string, jobNames []string, execution string) strin
 		parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
 	}
 	switch execution {
-	case "":
-		parts = append(parts, `NOT labels."run.googleapis.com/execution_name":*`)
-		parts = append(parts, `NOT log_name:"cloudaudit"`)
-	case "*":
+	case "", "*":
 		parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+		parts = append(parts, `NOT log_name:"cloudaudit"`)
 	default:
 		parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
 	}
@@ -57,8 +55,8 @@ func LogFilterMultiJob(region string, jobNames []string, execution string) strin
 //
 // For jobs, the execution argument controls scope:
 //
-//	""         – job-level logs only (no execution label, no audit logs)
-//	"*"        – all execution logs (execution label present, any value)
+//	""         – all execution logs (any execution), excludes audit logs; prefix = job name
+//	"*"        – all execution logs (any execution), excludes audit logs; prefix = execution label
 //	"<id>"     – logs for one specific execution
 func LogFilter(projectID, region, scheme, name, execution string) string {
 	var parts []string
@@ -78,13 +76,11 @@ func LogFilter(projectID, region, scheme, name, execution string) string {
 			parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
 		}
 		switch execution {
-		case "":
-			// Job-level system logs: no execution label, exclude audit noise
-			parts = append(parts, `NOT labels."run.googleapis.com/execution_name":*`)
-			parts = append(parts, `NOT log_name:"cloudaudit"`)
-		case "*":
-			// All executions: require execution label to be present
+		case "", "*":
+			// All executions (no specific execution given, or explicit wildcard).
+			// Exclude audit noise; execution label must be present.
 			parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+			parts = append(parts, `NOT log_name:"cloudaudit"`)
 		default:
 			// Specific execution
 			parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
