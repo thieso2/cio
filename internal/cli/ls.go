@@ -65,8 +65,8 @@ Examples (BigQuery):
 		var err error
 		var inputWasAlias bool
 
-		// If it's already a gs:// or bq:// path, use it directly
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
+		// If it's already a direct path, use it as-is
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -99,6 +99,7 @@ Examples (BigQuery):
 			HumanReadable: lsHumanReadable,
 			MaxResults:    lsMaxResults,
 			ProjectID:     cfg.Defaults.ProjectID,
+			Region:        cfg.Defaults.Region,
 		}
 
 		resources, err := res.List(ctx, fullPath, options)
@@ -132,7 +133,12 @@ Examples (BigQuery):
 
 		// Print header for long format if resource type provides one
 		if lsLongFormat {
-			header := res.FormatLongHeader()
+			var header string
+			if resolver.IsCloudRunPath(fullPath) {
+				header = resource.FormatLongHeaderDynamic(resources)
+			} else {
+				header = res.FormatLongHeader()
+			}
 			if header != "" {
 				fmt.Println(header)
 			}

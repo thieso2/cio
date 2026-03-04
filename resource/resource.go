@@ -39,7 +39,8 @@ type ListOptions struct {
 	HumanReadable bool
 	MaxResults    int
 	Pattern       string // Wildcard pattern (if applicable)
-	ProjectID     string // GCP Project ID (for bucket listing)
+	ProjectID     string // GCP Project ID (for bucket listing and Cloud Run)
+	Region        string // GCP Region (for Cloud Run)
 }
 
 // RemoveOptions contains options for removing resources

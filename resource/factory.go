@@ -32,6 +32,10 @@ func (f *Factory) Create(path string) (Resource, error) {
 		return CreateIAMResource(f.formatter), nil
 	}
 
+	if resolver.IsCloudRunPath(path) {
+		return CreateCloudRunResource(f.formatter), nil
+	}
+
 	return nil, fmt.Errorf("unknown resource type for path: %s", path)
 }
 
@@ -44,6 +48,8 @@ func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
 		return CreateBigQueryResource(f.formatter), nil
 	case TypeIAM:
 		return CreateIAMResource(f.formatter), nil
+	case TypeCloudRunService, TypeCloudRunJob, TypeCloudRunWorker:
+		return CreateCloudRunResource(f.formatter), nil
 	default:
 		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
 	}

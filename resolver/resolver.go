@@ -28,8 +28,9 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		return "", fmt.Errorf("alias path cannot be empty")
 	}
 
-	// If already a gs://, bq://, or iam:// path, return as-is
-	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") {
+	// If already a full path, return as-is
+	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") ||
+		strings.HasPrefix(aliasPath, "svc://") || strings.HasPrefix(aliasPath, "jobs://") || strings.HasPrefix(aliasPath, "worker://") {
 		return aliasPath, nil
 	}
 
@@ -76,6 +77,13 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		// BigQuery path - use dot separator
 		if suffix != "" {
 			fullPath = basePath + "." + suffix
+		} else {
+			fullPath = basePath
+		}
+	} else if strings.HasPrefix(basePath, "svc://") || strings.HasPrefix(basePath, "jobs://") || strings.HasPrefix(basePath, "worker://") {
+		// Cloud Run path - use slash separator, no normalization
+		if suffix != "" {
+			fullPath = basePath + "/" + suffix
 		} else {
 			fullPath = basePath
 		}
@@ -174,10 +182,10 @@ func IsGCSPath(path string) bool {
 	return strings.HasPrefix(path, "gs://")
 }
 
-// ReverseResolve converts a GCS/BigQuery path back to an alias path
-// Returns the alias path with : prefix if a matching alias exists, otherwise returns the original path
+// ReverseResolve converts a full path back to an alias path.
+// Returns the alias path with : prefix if a matching alias exists, otherwise returns the original path.
 func (r *Resolver) ReverseResolve(fullPath string) string {
-	if !IsGCSPath(fullPath) && !IsBQPath(fullPath) {
+	if !IsGCSPath(fullPath) && !IsBQPath(fullPath) && !IsCloudRunPath(fullPath) {
 		return fullPath
 	}
 
@@ -192,6 +200,16 @@ func (r *Resolver) ReverseResolve(fullPath string) string {
 					return ":" + alias
 				}
 				return ":" + alias + "." + suffix
+			}
+		} else if IsCloudRunPath(basePath) {
+			// Cloud Run path - match with slash separator
+			if strings.HasPrefix(fullPath, basePath) {
+				suffix := strings.TrimPrefix(fullPath, basePath)
+				suffix = strings.TrimPrefix(suffix, "/")
+				if suffix == "" {
+					return ":" + alias
+				}
+				return ":" + alias + "/" + suffix
 			}
 		} else {
 			// GCS path - match with slash separator
@@ -218,6 +236,26 @@ func IsBQPath(path string) bool {
 // IsIAMPath checks if a string is an IAM path
 func IsIAMPath(path string) bool {
 	return strings.HasPrefix(path, "iam://")
+}
+
+// IsSvcPath checks if a string is a Cloud Run service path
+func IsSvcPath(path string) bool {
+	return strings.HasPrefix(path, "svc://")
+}
+
+// IsJobsPath checks if a string is a Cloud Run job path
+func IsJobsPath(path string) bool {
+	return strings.HasPrefix(path, "jobs://")
+}
+
+// IsWorkerPath checks if a string is a Cloud Run worker pool path
+func IsWorkerPath(path string) bool {
+	return strings.HasPrefix(path, "worker://")
+}
+
+// IsCloudRunPath checks if a string is any Cloud Run path
+func IsCloudRunPath(path string) bool {
+	return IsSvcPath(path) || IsJobsPath(path) || IsWorkerPath(path)
 }
 
 // GetAliasForInput extracts the alias from user input if one was used

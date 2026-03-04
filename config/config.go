@@ -216,8 +216,9 @@ func (c *Config) Validate() error {
 		if strings.ContainsAny(alias, "/.") {
 			return fmt.Errorf("invalid alias %q: cannot contain '/' or '.'", alias)
 		}
-		if !strings.HasPrefix(path, "gs://") && !strings.HasPrefix(path, "bq://") {
-			return fmt.Errorf("invalid path for alias %q: must start with 'gs://' or 'bq://'", alias)
+		if !strings.HasPrefix(path, "gs://") && !strings.HasPrefix(path, "bq://") &&
+			!strings.HasPrefix(path, "svc://") && !strings.HasPrefix(path, "jobs://") && !strings.HasPrefix(path, "worker://") {
+			return fmt.Errorf("invalid path for alias %q: must start with 'gs://', 'bq://', 'svc://', 'jobs://', or 'worker://'", alias)
 		}
 	}
 	return nil
