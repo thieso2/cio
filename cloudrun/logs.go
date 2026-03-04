@@ -24,9 +24,12 @@ import (
 )
 
 // LogFilter builds a Cloud Logging filter for a Cloud Run resource.
-// scheme: "svc", "jobs", "worker"
-// name: service/job/worker pool name (empty = all)
-// execution: specific execution name (jobs only, empty = all)
+//
+// For jobs, the execution argument controls scope:
+//
+//	""         – job-level logs only (no execution label, no audit logs)
+//	"*"        – all execution logs (execution label present, any value)
+//	"<id>"     – logs for one specific execution
 func LogFilter(projectID, region, scheme, name, execution string) string {
 	var parts []string
 
@@ -44,7 +47,16 @@ func LogFilter(projectID, region, scheme, name, execution string) string {
 		if region != "" {
 			parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
 		}
-		if execution != "" {
+		switch execution {
+		case "":
+			// Job-level system logs: no execution label, exclude audit noise
+			parts = append(parts, `NOT labels."run.googleapis.com/execution_name":*`)
+			parts = append(parts, `NOT log_name:"cloudaudit"`)
+		case "*":
+			// All executions: require execution label to be present
+			parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+		default:
+			// Specific execution
 			parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
 		}
 	case "worker":
@@ -97,7 +109,8 @@ func FetchLogs(ctx context.Context, projectID, filter string, n int) ([]*logging
 
 // StreamLogs streams live log entries to stdout using gRPC TailLogEntries.
 // Blocks until ctx is cancelled.
-func StreamLogs(ctx context.Context, projectID, filter, prefix string) error {
+// When fixedPrefix is true, the prefix label is always shown as-is (no label extraction).
+func StreamLogs(ctx context.Context, projectID, filter, prefix string, fixedPrefix bool) error {
 	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/logging.read")
 	if err != nil {
 		return fmt.Errorf("getting credentials: %w", err)
@@ -132,7 +145,7 @@ func StreamLogs(ctx context.Context, projectID, filter, prefix string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Streaming logs... (Ctrl+C to stop)\n")
-	f := NewLogFormatter(prefix)
+	f := NewLogFormatter(prefix, fixedPrefix)
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -148,8 +161,9 @@ func StreamLogs(ctx context.Context, projectID, filter, prefix string) error {
 }
 
 // PrintLogs prints log entries to stdout with an optional prefix label.
-func PrintLogs(entries []*logging.Entry, prefix string) {
-	f := NewLogFormatter(prefix)
+// When fixedPrefix is true, the prefix label is always shown as-is (no label extraction).
+func PrintLogs(entries []*logging.Entry, prefix string, fixedPrefix bool) {
+	f := NewLogFormatter(prefix, fixedPrefix)
 	for _, e := range entries {
 		f.PrintEntry(os.Stdout, e)
 	}
@@ -198,28 +212,32 @@ func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
 
 // LogFormatter handles colored log output.
 type LogFormatter struct {
-	useColors   bool
-	prefix      string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
-	prefixColor *color.Color
-	errorColor  *color.Color
-	warnColor   *color.Color
-	infoColor   *color.Color
-	debugColor  *color.Color
+	useColors    bool
+	prefix       string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
+	useFixedPrefix bool // when true, always use prefix; when false, prefer execution_name label
+	prefixColor  *color.Color
+	errorColor   *color.Color
+	warnColor    *color.Color
+	infoColor    *color.Color
+	debugColor   *color.Color
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
 // prefix is an optional label prepended to every line (empty = no prefix).
-func NewLogFormatter(prefix string) *LogFormatter {
+// When fixedPrefix is true, the prefix is always shown; when false, the
+// run.googleapis.com/execution_name label is preferred over prefix.
+func NewLogFormatter(prefix string, fixedPrefix bool) *LogFormatter {
 	fileInfo, _ := os.Stdout.Stat()
 	useColors := (fileInfo.Mode() & os.ModeCharDevice) != 0
 	return &LogFormatter{
-		useColors:   useColors,
-		prefix:      prefix,
-		prefixColor: color.New(color.FgHiBlue),
-		errorColor:  color.New(color.FgRed),
-		warnColor:   color.New(color.FgYellow),
-		infoColor:   color.New(color.FgCyan),
-		debugColor:  color.New(color.Faint),
+		useColors:      useColors,
+		prefix:         prefix,
+		useFixedPrefix: fixedPrefix,
+		prefixColor:    color.New(color.FgHiBlue),
+		errorColor:     color.New(color.FgRed),
+		warnColor:      color.New(color.FgYellow),
+		infoColor:      color.New(color.FgCyan),
+		debugColor:     color.New(color.Faint),
 	}
 }
 
@@ -242,10 +260,15 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 	}
 
-	// Prefer execution name from entry labels, fall back to formatter prefix.
-	label := entry.Labels["run.googleapis.com/execution_name"]
-	if label == "" {
+	// Determine label: fixed prefix always wins; otherwise prefer execution_name label.
+	var label string
+	if f.useFixedPrefix {
 		label = f.prefix
+	} else {
+		label = entry.Labels["run.googleapis.com/execution_name"]
+		if label == "" {
+			label = f.prefix
+		}
 	}
 	if label != "" {
 		pfx := fmt.Sprintf("[%s] ", label)

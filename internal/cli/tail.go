@@ -85,10 +85,18 @@ func runTail(cmd *cobra.Command, args []string) error {
 	scheme, name, execution := parseTailPath(path)
 	filter := cloudrun.LogFilter(projectID, region, scheme, name, execution)
 
-	// Derive a display prefix from the path: prefer execution > name
+	// Derive display prefix and whether it should be fixed (not overridden by labels).
+	// - job-level (execution == ""):  use fixed job name, labels not present anyway
+	// - all executions (execution == "*"): no fixed prefix; let execution_name label show
+	// - specific execution: use fixed execution id as prefix
 	logPrefix := name
-	if execution != "" {
+	fixedPrefix := true
+	if execution == "*" {
+		logPrefix = ""
+		fixedPrefix = false
+	} else if execution != "" {
 		logPrefix = execution
+		fixedPrefix = true
 	}
 
 	if verbose {
@@ -102,7 +110,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	cloudrun.PrintLogs(entries, logPrefix)
+	cloudrun.PrintLogs(entries, logPrefix, fixedPrefix)
 
 	if !tailFollow {
 		if len(entries) == 0 {
@@ -124,7 +132,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	return cloudrun.StreamLogs(ctx, projectID, filter, logPrefix)
+	return cloudrun.StreamLogs(ctx, projectID, filter, logPrefix, fixedPrefix)
 }
 
 // parseTailPath splits a Cloud Run path into (scheme, name, execution).
