@@ -26,7 +26,7 @@ import (
 
 // LogFilterMultiJob builds a Cloud Logging filter for multiple job names (OR-joined).
 // Used when a wildcard pattern is expanded into concrete job names before filtering.
-func LogFilterMultiJob(region string, jobNames []string, execution string) string {
+func LogFilterMultiJob(region string, jobNames []string, execution string, audit bool) string {
 	var parts []string
 	parts = append(parts, `resource.type="cloud_run_job"`)
 	if region != "" {
@@ -41,12 +41,16 @@ func LogFilterMultiJob(region string, jobNames []string, execution string) strin
 		}
 		parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
 	}
-	switch execution {
-	case "", "*":
-		parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
-		parts = append(parts, `NOT log_name:"cloudaudit"`)
-	default:
-		parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
+	if audit {
+		parts = append(parts, `log_name:"cloudaudit"`)
+	} else {
+		switch execution {
+		case "", "*":
+			parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+			parts = append(parts, `NOT log_name:"cloudaudit"`)
+		default:
+			parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
+		}
 	}
 	return strings.Join(parts, " AND ")
 }
@@ -58,7 +62,11 @@ func LogFilterMultiJob(region string, jobNames []string, execution string) strin
 //	""         – all execution logs (any execution), excludes audit logs; prefix = job name
 //	"*"        – all execution logs (any execution), excludes audit logs; prefix = execution label
 //	"<id>"     – logs for one specific execution
-func LogFilter(projectID, region, scheme, name, execution string) string {
+//
+// When audit is true, returns Cloud Audit logs instead (job-level events like
+// "execution created", "job updated"). Audit logs exist at the job resource level
+// and do not carry execution labels.
+func LogFilter(projectID, region, scheme, name, execution string, audit bool) string {
 	var parts []string
 
 	switch scheme {
@@ -66,6 +74,11 @@ func LogFilter(projectID, region, scheme, name, execution string) string {
 		parts = append(parts, `resource.type="cloud_run_revision"`)
 		if name != "" {
 			parts = append(parts, fmt.Sprintf(`resource.labels.service_name="%s"`, name))
+		}
+		if !audit {
+			parts = append(parts, `NOT log_name:"cloudaudit"`)
+		} else {
+			parts = append(parts, `log_name:"cloudaudit"`)
 		}
 	case "jobs":
 		parts = append(parts, `resource.type="cloud_run_job"`)
@@ -75,15 +88,21 @@ func LogFilter(projectID, region, scheme, name, execution string) string {
 		if region != "" {
 			parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
 		}
-		switch execution {
-		case "", "*":
-			// All executions (no specific execution given, or explicit wildcard).
-			// Exclude audit noise; execution label must be present.
-			parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
-			parts = append(parts, `NOT log_name:"cloudaudit"`)
-		default:
-			// Specific execution
-			parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
+		if audit {
+			// Audit logs: job-level events (execution created, job updated, etc.)
+			// They do NOT have execution_name labels — they're at the job resource level.
+			parts = append(parts, `log_name:"cloudaudit"`)
+		} else {
+			switch execution {
+			case "", "*":
+				// All executions (no specific execution given, or explicit wildcard).
+				// Exclude audit noise; execution label must be present.
+				parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+				parts = append(parts, `NOT log_name:"cloudaudit"`)
+			default:
+				// Specific execution
+				parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
+			}
 		}
 	case "worker":
 		parts = append(parts, `resource.type="cloud_run_worker_pool"`)
@@ -93,7 +112,11 @@ func LogFilter(projectID, region, scheme, name, execution string) string {
 		if region != "" {
 			parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
 		}
-		parts = append(parts, `NOT log_name:"cloudaudit"`)
+		if !audit {
+			parts = append(parts, `NOT log_name:"cloudaudit"`)
+		} else {
+			parts = append(parts, `log_name:"cloudaudit"`)
+		}
 	}
 
 	return strings.Join(parts, " AND ")
@@ -135,10 +158,10 @@ func FetchLogs(ctx context.Context, projectID, filter string, n int) ([]*logging
 
 // FetchLogsMultiJob fetches n log entries per job name, merges, and returns
 // them in chronological order (oldest first).
-func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames []string, execution string, n int) ([]*logging.Entry, error) {
+func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames []string, execution string, n int, audit bool) ([]*logging.Entry, error) {
 	var all []*logging.Entry
 	for _, jobName := range jobNames {
-		f := LogFilter(projectID, region, "jobs", jobName, execution)
+		f := LogFilter(projectID, region, "jobs", jobName, execution, audit)
 		entries, err := FetchLogs(ctx, projectID, f, n)
 		if err != nil {
 			return nil, fmt.Errorf("fetching logs for job %s: %w", jobName, err)
@@ -364,6 +387,10 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 		if label == "" {
 			label = f.prefix
+		}
+		// For audit logs (no execution label), fall back to the resource's job_name label.
+		if label == "" && entry.Resource != nil {
+			label = entry.Resource.Labels["job_name"]
 		}
 	}
 	if label != "" {

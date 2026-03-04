@@ -18,6 +18,7 @@ import (
 var (
 	tailFollow   bool
 	tailNumLines int
+	tailAudit    bool
 )
 
 var tailCmd = &cobra.Command{
@@ -107,28 +108,38 @@ func runTail(cmd *cobra.Command, args []string) error {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Matched jobs: %s\n", strings.Join(matchedJobs, ", "))
 		}
-		filter = cloudrun.LogFilterMultiJob(region, matchedJobs, execution)
+		filter = cloudrun.LogFilterMultiJob(region, matchedJobs, execution, tailAudit)
 	} else {
-		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution)
+		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution, tailAudit)
 	}
 
 	// Derive display prefix and whether it should be fixed (not overridden by labels).
+	// Derive display prefix and whether it should be fixed (not overridden by labels).
+	// - audit mode, wildcard: show job name from resource labels per entry
+	// - audit mode, single job: fixed job name
 	// - wildcard job, no execution: map execution label → job name via knownJobs
 	// - all executions ("*"): show execution_name label directly
 	// - specific execution: fixed execution id as prefix
 	// - single job, no execution: fixed job name
 	logPrefix := name
 	fixedPrefix := true
-	if execution == "*" {
-		logPrefix = ""
-		fixedPrefix = false
-	} else if execution != "" {
-		logPrefix = execution
-		fixedPrefix = true
-	} else if len(matchedJobs) > 0 {
-		// Wildcard expanded — derive job name per entry from execution label.
-		logPrefix = ""
-		fixedPrefix = false
+	if tailAudit {
+		if len(matchedJobs) > 0 {
+			// Wildcard expanded in audit mode — derive job name from resource labels.
+			logPrefix = ""
+			fixedPrefix = false
+		}
+	} else {
+		if execution != "" && execution != "*" {
+			// Specific execution: show its id as fixed prefix.
+			logPrefix = execution
+			fixedPrefix = true
+		} else {
+			// No execution or wildcard: show execution_name label from each entry.
+			// For wildcard jobs, SetKnownJobs maps execution names back to job names.
+			logPrefix = ""
+			fixedPrefix = false
+		}
 	}
 
 	if verbose {
@@ -138,7 +149,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// Single formatter shared by historical print and live stream so column
 	// widths accumulated during history are preserved in streaming mode.
 	f := cloudrun.NewLogFormatter(logPrefix, fixedPrefix)
-	if len(matchedJobs) > 0 && execution == "" {
+	if len(matchedJobs) > 0 && (execution == "" || tailAudit) {
 		f.SetKnownJobs(matchedJobs)
 	}
 
@@ -148,7 +159,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// otherwise n lines total.
 	var entries []*logging.Entry
 	if len(matchedJobs) > 1 {
-		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines)
+		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines, tailAudit)
 	} else {
 		entries, err = cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
 	}
@@ -203,8 +214,10 @@ func parseTailPath(path string) (scheme, name, execution string) {
 func init() {
 	tailCmd.Flags().BoolVarP(&tailFollow, "follow", "f", false, "stream live logs (follow mode)")
 	tailCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
+	tailCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
 	rootCmd.AddCommand(tailCmd)
 
 	showCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
+	showCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
 	rootCmd.AddCommand(showCmd)
 }
