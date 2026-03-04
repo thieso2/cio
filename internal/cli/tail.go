@@ -91,33 +91,34 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	if tailFollow {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigChan)
-		go func() {
-			<-sigChan
-			fmt.Fprintln(os.Stderr, "\nInterrupted.")
-			cancel()
-		}()
-
-		return cloudrun.StreamLogs(ctx, projectID, filter)
-	}
-
-	// Show recent logs
+	// Always fetch historical lines first
 	entries, err := cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	if len(entries) == 0 {
-		fmt.Fprintln(os.Stderr, "No log entries found.")
+	cloudrun.PrintLogs(entries)
+
+	if !tailFollow {
+		if len(entries) == 0 {
+			fmt.Fprintln(os.Stderr, "No log entries found.")
+		}
 		return nil
 	}
-	cloudrun.PrintLogs(entries)
-	return nil
+
+	// Then stream live
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	go func() {
+		<-sigChan
+		fmt.Fprintln(os.Stderr, "\nInterrupted.")
+		cancel()
+	}()
+
+	return cloudrun.StreamLogs(ctx, projectID, filter)
 }
 
 // parseTailPath splits a Cloud Run path into (scheme, name, execution).
