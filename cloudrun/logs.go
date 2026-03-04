@@ -212,14 +212,16 @@ func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
 
 // LogFormatter handles colored log output.
 type LogFormatter struct {
-	useColors    bool
-	prefix       string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
-	useFixedPrefix bool // when true, always use prefix; when false, prefer execution_name label
-	prefixColor  *color.Color
-	errorColor   *color.Color
-	warnColor    *color.Color
-	infoColor    *color.Color
-	debugColor   *color.Color
+	useColors      bool
+	prefix         string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
+	useFixedPrefix bool   // when true, always use prefix; when false, prefer execution_name label
+	prefixColor    *color.Color
+	timeColor      *color.Color
+	errorColor     *color.Color
+	warnColor      *color.Color
+	infoColor      *color.Color
+	debugColor     *color.Color
+	keyColor       *color.Color // slog key names
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -234,10 +236,12 @@ func NewLogFormatter(prefix string, fixedPrefix bool) *LogFormatter {
 		prefix:         prefix,
 		useFixedPrefix: fixedPrefix,
 		prefixColor:    color.New(color.FgHiBlue),
-		errorColor:     color.New(color.FgRed),
+		timeColor:      color.New(color.Faint),
+		errorColor:     color.New(color.FgRed, color.Bold),
 		warnColor:      color.New(color.FgYellow),
 		infoColor:      color.New(color.FgCyan),
 		debugColor:     color.New(color.Faint),
+		keyColor:       color.New(color.Faint),
 	}
 }
 
@@ -245,6 +249,9 @@ func NewLogFormatter(prefix string, fixedPrefix bool) *LogFormatter {
 func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 	ts := entry.Timestamp.In(time.Local)
 	timeStr := ts.Format("15:04:05.000")
+	if f.useColors {
+		timeStr = f.timeColor.Sprint(timeStr)
+	}
 
 	severityStr := fmt.Sprintf("%-8s", entry.Severity.String())
 	if f.useColors {
@@ -275,14 +282,14 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		if f.useColors {
 			pfx = f.prefixColor.Sprint(pfx)
 		}
-		fmt.Fprintf(w, "%s%s %s %s\n", pfx, timeStr, severityStr, extractLogMessage(entry))
+		fmt.Fprintf(w, "%s%s %s %s\n", pfx, timeStr, severityStr, f.formatMessage(entry))
 	} else {
-		fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, extractLogMessage(entry))
+		fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, f.formatMessage(entry))
 	}
 }
 
-// extractLogMessage extracts a readable message from a log entry.
-func extractLogMessage(entry *logging.Entry) string {
+// formatMessage extracts and formats a readable message from a log entry.
+func (f *LogFormatter) formatMessage(entry *logging.Entry) string {
 	if entry.HTTPRequest != nil {
 		return formatHTTPLogEntry(entry.HTTPRequest)
 	}
@@ -293,16 +300,15 @@ func extractLogMessage(entry *logging.Entry) string {
 	case string:
 		return v
 	case map[string]interface{}:
-		return extractFromLogMap(v)
+		return f.formatLogMap(v)
 	}
 	return fmt.Sprintf("%v", entry.Payload)
 }
 
-// extractFromLogMap extracts a message from a structured map payload.
-// If the map looks like slog output (has "msg" or "message" plus extra fields),
-// the extra key-value pairs are appended to the message.
-func extractFromLogMap(m map[string]interface{}) string {
-	// Fields that are never shown as extra key-value pairs.
+// formatLogMap formats a structured map payload.
+// If a msg/message key is present, extra fields are appended as key=value pairs (slog style).
+func (f *LogFormatter) formatLogMap(m map[string]interface{}) string {
+	// Fields never shown as extra key-value pairs.
 	metaKeys := map[string]bool{
 		"msg": true, "message": true, "text": true,
 		"level": true, "severity": true,
@@ -314,7 +320,6 @@ func extractFromLogMap(m map[string]interface{}) string {
 	for _, key := range []string{"message", "msg", "text"} {
 		if v, ok := m[key].(string); ok && v != "" {
 			msgKey = key
-			_ = v
 			break
 		}
 	}
@@ -322,18 +327,25 @@ func extractFromLogMap(m map[string]interface{}) string {
 	if msgKey != "" {
 		msg := m[msgKey].(string)
 		// Collect remaining structured fields (slog-style extras).
-		var extras []string
-		for k, v := range m {
-			if metaKeys[k] {
-				continue
+		var keys []string
+		for k := range m {
+			if !metaKeys[k] {
+				keys = append(keys, k)
 			}
-			s := fmt.Sprintf("%v", v)
+		}
+		sort.Strings(keys)
+		var extras []string
+		for _, k := range keys {
+			s := fmt.Sprintf("%v", m[k])
 			if len(s) > 100 {
 				s = s[:100] + "..."
 			}
-			extras = append(extras, fmt.Sprintf("%s=%s", k, s))
+			if f.useColors {
+				extras = append(extras, f.keyColor.Sprint(k+"=")+s)
+			} else {
+				extras = append(extras, k+"="+s)
+			}
 		}
-		sort.Strings(extras)
 		if len(extras) > 0 {
 			return msg + "  " + strings.Join(extras, " ")
 		}
@@ -344,19 +356,26 @@ func extractFromLogMap(m map[string]interface{}) string {
 		return formatHTTPLogMap(httpReq)
 	}
 
-	// Fallback: format non-noisy fields.
-	var parts []string
-	for k, v := range m {
-		if metaKeys[k] {
-			continue
+	// Fallback: format all non-meta fields.
+	var keys []string
+	for k := range m {
+		if !metaKeys[k] {
+			keys = append(keys, k)
 		}
-		s := fmt.Sprintf("%v", v)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		s := fmt.Sprintf("%v", m[k])
 		if len(s) > 100 {
 			s = s[:100] + "..."
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
+		if f.useColors {
+			parts = append(parts, f.keyColor.Sprint(k+"=")+s)
+		} else {
+			parts = append(parts, k+"="+s)
+		}
 	}
-	sort.Strings(parts)
 	return strings.Join(parts, " ")
 }
 
