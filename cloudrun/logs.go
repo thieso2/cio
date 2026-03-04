@@ -277,7 +277,14 @@ type LogFormatter struct {
 	keyColor       *color.Color // slog key names
 	prefixColorMap map[string]*color.Color // label → assigned palette color
 	prefixColorIdx int
-	maxLabelWidth  int // widest [label] seen; used for column padding
+	maxLabelWidth  int      // widest [label] seen; used for column padding
+	knownJobs      []string // when set, maps execution names back to job names
+}
+
+// SetKnownJobs tells the formatter about concrete job names so that execution
+// labels like "legacy-mysql-to-bq-lz5n5" are displayed as "legacy-mysql-to-bq".
+func (f *LogFormatter) SetKnownJobs(jobs []string) {
+	f.knownJobs = jobs
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -338,12 +345,23 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 	}
 
-	// Determine label: fixed prefix always wins; otherwise prefer execution_name label.
+	// Determine label: fixed prefix always wins; otherwise derive from entry labels.
 	var label string
 	if f.useFixedPrefix {
 		label = f.prefix
 	} else {
-		label = entry.Labels["run.googleapis.com/execution_name"]
+		execName := entry.Labels["run.googleapis.com/execution_name"]
+		label = execName
+		// If we know the concrete job names, map the execution name back to its job.
+		// Cloud Run execution names are always "{job-name}-{5-char-suffix}".
+		if execName != "" && len(f.knownJobs) > 0 {
+			for _, jobName := range f.knownJobs {
+				if strings.HasPrefix(execName, jobName+"-") {
+					label = jobName
+					break
+				}
+			}
+		}
 		if label == "" {
 			label = f.prefix
 		}

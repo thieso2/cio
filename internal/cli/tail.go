@@ -113,9 +113,10 @@ func runTail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Derive display prefix and whether it should be fixed (not overridden by labels).
-	// - job-level (execution == ""):  use fixed job name, labels not present anyway
-	// - all executions (execution == "*"): no fixed prefix; let execution_name label show
-	// - specific execution: use fixed execution id as prefix
+	// - wildcard job, no execution: map execution label → job name via knownJobs
+	// - all executions ("*"): show execution_name label directly
+	// - specific execution: fixed execution id as prefix
+	// - single job, no execution: fixed job name
 	logPrefix := name
 	fixedPrefix := true
 	if execution == "*" {
@@ -124,6 +125,10 @@ func runTail(cmd *cobra.Command, args []string) error {
 	} else if execution != "" {
 		logPrefix = execution
 		fixedPrefix = true
+	} else if len(matchedJobs) > 0 {
+		// Wildcard expanded — derive job name per entry from execution label.
+		logPrefix = ""
+		fixedPrefix = false
 	}
 
 	if verbose {
@@ -133,6 +138,9 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// Single formatter shared by historical print and live stream so column
 	// widths accumulated during history are preserved in streaming mode.
 	f := cloudrun.NewLogFormatter(logPrefix, fixedPrefix)
+	if len(matchedJobs) > 0 && execution == "" {
+		f.SetKnownJobs(matchedJobs)
+	}
 
 	ctx := context.Background()
 
