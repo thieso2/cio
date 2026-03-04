@@ -19,6 +19,7 @@ var (
 	tailFollow   bool
 	tailNumLines int
 	tailAudit    bool
+	tailSeverity string
 )
 
 var tailCmd = &cobra.Command{
@@ -108,9 +109,9 @@ func runTail(cmd *cobra.Command, args []string) error {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Matched jobs: %s\n", strings.Join(matchedJobs, ", "))
 		}
-		filter = cloudrun.LogFilterMultiJob(region, matchedJobs, execution, tailAudit)
+		filter = cloudrun.LogFilterMultiJob(region, matchedJobs, execution, tailAudit, tailSeverity)
 	} else {
-		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution, tailAudit)
+		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution, tailAudit, tailSeverity)
 	}
 
 	// Derive display prefix and whether it should be fixed (not overridden by labels).
@@ -159,7 +160,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// otherwise n lines total.
 	var entries []*logging.Entry
 	if len(matchedJobs) > 1 {
-		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines, tailAudit)
+		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines, tailAudit, tailSeverity)
 	} else {
 		entries, err = cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
 	}
@@ -215,9 +216,11 @@ func init() {
 	tailCmd.Flags().BoolVarP(&tailFollow, "follow", "f", false, "stream live logs (follow mode)")
 	tailCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
 	tailCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
+	tailCmd.Flags().StringVarP(&tailSeverity, "severity", "s", "", "minimum severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 	rootCmd.AddCommand(tailCmd)
 
 	showCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
 	showCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
+	showCmd.Flags().StringVarP(&tailSeverity, "severity", "s", "", "minimum severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 	rootCmd.AddCommand(showCmd)
 }

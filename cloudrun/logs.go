@@ -26,7 +26,7 @@ import (
 
 // LogFilterMultiJob builds a Cloud Logging filter for multiple job names (OR-joined).
 // Used when a wildcard pattern is expanded into concrete job names before filtering.
-func LogFilterMultiJob(region string, jobNames []string, execution string, audit bool) string {
+func LogFilterMultiJob(region string, jobNames []string, execution string, audit bool, severity string) string {
 	var parts []string
 	parts = append(parts, `resource.type="cloud_run_job"`)
 	if region != "" {
@@ -52,6 +52,9 @@ func LogFilterMultiJob(region string, jobNames []string, execution string, audit
 			parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
 		}
 	}
+	if severity != "" {
+		parts = append(parts, fmt.Sprintf(`severity>=%s`, strings.ToUpper(severity)))
+	}
 	return strings.Join(parts, " AND ")
 }
 
@@ -66,7 +69,7 @@ func LogFilterMultiJob(region string, jobNames []string, execution string, audit
 // When audit is true, returns Cloud Audit logs instead (job-level events like
 // "execution created", "job updated"). Audit logs exist at the job resource level
 // and do not carry execution labels.
-func LogFilter(projectID, region, scheme, name, execution string, audit bool) string {
+func LogFilter(projectID, region, scheme, name, execution string, audit bool, severity string) string {
 	var parts []string
 
 	switch scheme {
@@ -122,6 +125,10 @@ func LogFilter(projectID, region, scheme, name, execution string, audit bool) st
 		}
 	}
 
+	if severity != "" {
+		parts = append(parts, fmt.Sprintf(`severity>=%s`, strings.ToUpper(severity)))
+	}
+
 	return strings.Join(parts, " AND ")
 }
 
@@ -161,10 +168,10 @@ func FetchLogs(ctx context.Context, projectID, filter string, n int) ([]*logging
 
 // FetchLogsMultiJob fetches n log entries per job name, merges, and returns
 // them in chronological order (oldest first).
-func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames []string, execution string, n int, audit bool) ([]*logging.Entry, error) {
+func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames []string, execution string, n int, audit bool, severity string) ([]*logging.Entry, error) {
 	var all []*logging.Entry
 	for _, jobName := range jobNames {
-		f := LogFilter(projectID, region, "jobs", jobName, execution, audit)
+		f := LogFilter(projectID, region, "jobs", jobName, execution, audit, severity)
 		entries, err := FetchLogs(ctx, projectID, f, n)
 		if err != nil {
 			return nil, fmt.Errorf("fetching logs for job %s: %w", jobName, err)
