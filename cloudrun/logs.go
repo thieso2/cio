@@ -221,13 +221,35 @@ func StreamLogs(ctx context.Context, projectID, filter string, f *LogFormatter) 
 	}
 
 	fmt.Fprintf(os.Stderr, "Streaming logs... (Ctrl+C to stop)\n")
+	const maxRetries = 2
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("receiving log entries: %w", err)
+			// Retry on transient errors (connection reset, unavailable, etc.)
+			reconnected := false
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				if ctx.Err() != nil {
+					return nil
+				}
+				newStream, sendErr := client.TailLogEntries(ctx)
+				if sendErr != nil {
+					continue
+				}
+				if sendErr = newStream.Send(req); sendErr != nil {
+					continue
+				}
+				stream = newStream
+				reconnected = true
+				break
+			}
+			if !reconnected {
+				return fmt.Errorf("receiving log entries: %w", err)
+			}
+			continue
 		}
 		for _, entry := range resp.Entries {
 			f.PrintEntry(os.Stdout, protoToEntry(entry))
