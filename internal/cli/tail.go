@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"syscall"
 
@@ -60,20 +61,20 @@ See 'cio tail --help' for path format and examples.`,
 }
 
 func runTail(cmd *cobra.Command, args []string) error {
-	path := args[0]
+	crPath := args[0]
 
 	// Resolve alias if needed
 	r := resolver.Create(cfg)
 	var err error
-	if !resolver.IsCloudRunPath(path) {
-		path, err = r.Resolve(path)
+	if !resolver.IsCloudRunPath(crPath) {
+		crPath, err = r.Resolve(crPath)
 		if err != nil {
 			return err
 		}
 	}
 
-	if !resolver.IsCloudRunPath(path) {
-		return fmt.Errorf("tail only supports Cloud Run paths (svc://, jobs://, worker://), got: %s", path)
+	if !resolver.IsCloudRunPath(crPath) {
+		return fmt.Errorf("tail only supports Cloud Run paths (svc://, jobs://, worker://), got: %s", crPath)
 	}
 
 	projectID := cfg.Defaults.ProjectID
@@ -82,8 +83,33 @@ func runTail(cmd *cobra.Command, args []string) error {
 	}
 	region := cfg.Defaults.Region
 
-	scheme, name, execution := parseTailPath(path)
-	filter := cloudrun.LogFilter(projectID, region, scheme, name, execution)
+	scheme, name, execution := parseTailPath(crPath)
+
+	// When the job name contains wildcards, expand to concrete names first —
+	// Cloud Logging filters cannot handle glob patterns.
+	var filter string
+	if scheme == "jobs" && strings.ContainsAny(name, "*?") {
+		ctx0 := context.Background()
+		jobs, err := cloudrun.ListJobs(ctx0, projectID, region)
+		if err != nil {
+			return fmt.Errorf("expanding job wildcard: %w", err)
+		}
+		var matched []string
+		for _, j := range jobs {
+			if ok, _ := path.Match(name, j.Name); ok {
+				matched = append(matched, j.Name)
+			}
+		}
+		if len(matched) == 0 {
+			return fmt.Errorf("no jobs match pattern %q", name)
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Matched jobs: %s\n", strings.Join(matched, ", "))
+		}
+		filter = cloudrun.LogFilterMultiJob(region, matched, execution)
+	} else {
+		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution)
+	}
 
 	// Derive display prefix and whether it should be fixed (not overridden by labels).
 	// - job-level (execution == ""):  use fixed job name, labels not present anyway

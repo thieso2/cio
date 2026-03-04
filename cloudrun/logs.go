@@ -23,6 +23,35 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+// LogFilterMultiJob builds a Cloud Logging filter for multiple job names (OR-joined).
+// Used when a wildcard pattern is expanded into concrete job names before filtering.
+func LogFilterMultiJob(region string, jobNames []string, execution string) string {
+	var parts []string
+	parts = append(parts, `resource.type="cloud_run_job"`)
+	if region != "" {
+		parts = append(parts, fmt.Sprintf(`resource.labels.location="%s"`, region))
+	}
+	if len(jobNames) == 1 {
+		parts = append(parts, fmt.Sprintf(`resource.labels.job_name="%s"`, jobNames[0]))
+	} else if len(jobNames) > 1 {
+		var nameFilters []string
+		for _, n := range jobNames {
+			nameFilters = append(nameFilters, fmt.Sprintf(`resource.labels.job_name="%s"`, n))
+		}
+		parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
+	}
+	switch execution {
+	case "":
+		parts = append(parts, `NOT labels."run.googleapis.com/execution_name":*`)
+		parts = append(parts, `NOT log_name:"cloudaudit"`)
+	case "*":
+		parts = append(parts, `labels."run.googleapis.com/execution_name":*`)
+	default:
+		parts = append(parts, fmt.Sprintf(`labels."run.googleapis.com/execution_name"="%s"`, execution))
+	}
+	return strings.Join(parts, " AND ")
+}
+
 // LogFilter builds a Cloud Logging filter for a Cloud Run resource.
 //
 // For jobs, the execution argument controls scope:
