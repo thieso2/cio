@@ -192,6 +192,7 @@ func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
 		Severity:    logging.Severity(entry.Severity),
 		Payload:     payload,
 		HTTPRequest: httpRequest,
+		Labels:      entry.Labels,
 	}
 }
 
@@ -241,8 +242,13 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 	}
 
-	if f.prefix != "" {
-		pfx := fmt.Sprintf("[%s] ", f.prefix)
+	// Prefer execution name from entry labels, fall back to formatter prefix.
+	label := entry.Labels["run.googleapis.com/execution_name"]
+	if label == "" {
+		label = f.prefix
+	}
+	if label != "" {
+		pfx := fmt.Sprintf("[%s] ", label)
 		if f.useColors {
 			pfx = f.prefixColor.Sprint(pfx)
 		}
