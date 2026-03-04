@@ -285,6 +285,7 @@ type LogFormatter struct {
 	keyColor       *color.Color // slog key names
 	prefixColorMap map[string]*color.Color // label → assigned palette color
 	prefixColorIdx int
+	maxLabelWidth  int // widest [label] seen; used for column padding
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -356,7 +357,12 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 	}
 	if label != "" {
-		pfx := fmt.Sprintf("[%s] ", label)
+		// Pad [label] to the widest seen so far so the timestamp column aligns.
+		raw := "[" + label + "]"
+		if len(raw) > f.maxLabelWidth {
+			f.maxLabelWidth = len(raw)
+		}
+		pfx := fmt.Sprintf("%-*s ", f.maxLabelWidth, raw)
 		if f.useColors {
 			pfx = f.prefixColor(label).Sprint(pfx)
 		}
