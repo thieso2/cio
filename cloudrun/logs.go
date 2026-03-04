@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // LogFilterMultiJob builds a Cloud Logging filter for multiple job names (OR-joined).
@@ -293,6 +294,10 @@ type LogFormatter struct {
 func NewLogFormatter(prefix string, fixedPrefix bool) *LogFormatter {
 	fileInfo, _ := os.Stdout.Stat()
 	useColors := (fileInfo.Mode() & os.ModeCharDevice) != 0
+	if useColors {
+		// fatih/color may disagree with our isatty check; override it.
+		color.NoColor = false
+	}
 	return &LogFormatter{
 		useColors:      useColors,
 		prefix:         prefix,
@@ -374,6 +379,9 @@ func (f *LogFormatter) formatMessage(entry *logging.Entry) string {
 		return v
 	case map[string]interface{}:
 		return f.formatLogMap(v)
+	case *structpb.Struct:
+		// logadmin returns JSON payloads as *structpb.Struct; convert to map first.
+		return f.formatLogMap(v.AsMap())
 	}
 	return fmt.Sprintf("%v", entry.Payload)
 }
