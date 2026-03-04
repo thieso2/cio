@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/thieso2/cio/cloudrun"
@@ -57,8 +58,14 @@ func (r *CloudRunResource) List(ctx context.Context, path string, opts *ListOpti
 	case "svc":
 		return r.listServices(ctx, project, region)
 	case "jobs":
+		nameHasWildcard := strings.ContainsAny(p.name, "*?")
 		if p.name == "" {
 			return r.listJobs(ctx, project, region)
+		}
+		if nameHasWildcard {
+			// Pattern like jobs://legacy*  → filtered job list
+			// Pattern like jobs://legacy*/* → executions for all matching jobs
+			return r.listJobsOrExecutionsByPattern(ctx, project, region, p.name, p.execution)
 		}
 		return r.listExecutions(ctx, project, region, p.name)
 	case "worker":
@@ -126,6 +133,54 @@ func (r *CloudRunResource) listJobs(ctx context.Context, project, region string)
 			Created:  job.Created,
 			Metadata: job,
 		})
+	}
+	return resources, nil
+}
+
+// listJobsOrExecutionsByPattern handles wildcard job-name patterns.
+// When execution is "*" it lists executions for every matching job;
+// otherwise it returns the matching jobs themselves.
+func (r *CloudRunResource) listJobsOrExecutionsByPattern(ctx context.Context, project, region, namePattern, execution string) ([]*ResourceInfo, error) {
+	jobs, err := cloudrun.ListJobs(ctx, project, region)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter jobs by name pattern.
+	var matched []*cloudrun.JobInfo
+	for _, job := range jobs {
+		ok, _ := path.Match(namePattern, job.Name)
+		if ok {
+			matched = append(matched, job)
+		}
+	}
+
+	if execution != "*" {
+		// Return the filtered job list.
+		r.lastScheme = "jobs"
+		var resources []*ResourceInfo
+		for _, job := range matched {
+			resources = append(resources, &ResourceInfo{
+				Name:     job.Name,
+				Path:     "jobs://" + job.Name,
+				Type:     "job",
+				Modified: job.Updated,
+				Created:  job.Created,
+				Metadata: job,
+			})
+		}
+		return resources, nil
+	}
+
+	// execution == "*": list executions for every matching job.
+	r.lastScheme = "jobs-executions"
+	var resources []*ResourceInfo
+	for _, job := range matched {
+		execs, err := r.listExecutions(ctx, project, region, job.Name)
+		if err != nil {
+			return nil, err
+		}
+		resources = append(resources, execs...)
 	}
 	return resources, nil
 }
@@ -220,7 +275,9 @@ func (r *CloudRunResource) FormatLongHeader() string {
 	case "svc":
 		return cloudrun.ServiceLongHeader()
 	case "jobs":
-		return cloudrun.JobLongHeader() // or ExecutionLongHeader — resolved at List() time below
+		return cloudrun.JobLongHeader()
+	case "jobs-executions":
+		return cloudrun.ExecutionLongHeader()
 	case "worker":
 		return cloudrun.WorkerPoolLongHeader()
 	}
