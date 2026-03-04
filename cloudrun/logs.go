@@ -257,18 +257,33 @@ func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
 	}
 }
 
+// prefixPalette is the cycling set of colors assigned to distinct prefix labels.
+var prefixPalette = []*color.Color{
+	color.New(color.FgHiBlue),
+	color.New(color.FgHiGreen),
+	color.New(color.FgHiMagenta),
+	color.New(color.FgHiCyan),
+	color.New(color.FgHiYellow),
+	color.New(color.FgBlue),
+	color.New(color.FgGreen),
+	color.New(color.FgMagenta),
+	color.New(color.FgCyan),
+	color.New(color.FgYellow),
+}
+
 // LogFormatter handles colored log output.
 type LogFormatter struct {
 	useColors      bool
 	prefix         string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
 	useFixedPrefix bool   // when true, always use prefix; when false, prefer execution_name label
-	prefixColor    *color.Color
 	timeColor      *color.Color
 	errorColor     *color.Color
 	warnColor      *color.Color
 	infoColor      *color.Color
 	debugColor     *color.Color
 	keyColor       *color.Color // slog key names
+	prefixColorMap map[string]*color.Color // label → assigned palette color
+	prefixColorIdx int
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -282,14 +297,25 @@ func NewLogFormatter(prefix string, fixedPrefix bool) *LogFormatter {
 		useColors:      useColors,
 		prefix:         prefix,
 		useFixedPrefix: fixedPrefix,
-		prefixColor:    color.New(color.FgHiBlue),
 		timeColor:      color.New(color.Faint),
 		errorColor:     color.New(color.FgRed, color.Bold),
 		warnColor:      color.New(color.FgYellow),
 		infoColor:      color.New(color.FgCyan),
 		debugColor:     color.New(color.Faint),
 		keyColor:       color.New(color.Faint),
+		prefixColorMap: make(map[string]*color.Color),
 	}
+}
+
+// prefixColor returns a stable color for the given label, cycling through the palette.
+func (f *LogFormatter) prefixColor(label string) *color.Color {
+	if c, ok := f.prefixColorMap[label]; ok {
+		return c
+	}
+	c := prefixPalette[f.prefixColorIdx%len(prefixPalette)]
+	f.prefixColorIdx++
+	f.prefixColorMap[label] = c
+	return c
 }
 
 // PrintEntry formats and prints a single log entry.
@@ -327,7 +353,7 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 	if label != "" {
 		pfx := fmt.Sprintf("[%s] ", label)
 		if f.useColors {
-			pfx = f.prefixColor.Sprint(pfx)
+			pfx = f.prefixColor(label).Sprint(pfx)
 		}
 		fmt.Fprintf(w, "%s%s %s %s\n", pfx, timeStr, severityStr, f.formatMessage(entry))
 	} else {
