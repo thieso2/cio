@@ -85,6 +85,12 @@ func runTail(cmd *cobra.Command, args []string) error {
 	scheme, name, execution := parseTailPath(path)
 	filter := cloudrun.LogFilter(projectID, region, scheme, name, execution)
 
+	// Derive a display prefix from the path: prefer execution > name
+	logPrefix := name
+	if execution != "" {
+		logPrefix = execution
+	}
+
 	if verbose {
 		fmt.Fprintf(os.Stderr, "Filter: %s\n", filter)
 	}
@@ -96,7 +102,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	cloudrun.PrintLogs(entries)
+	cloudrun.PrintLogs(entries, logPrefix)
 
 	if !tailFollow {
 		if len(entries) == 0 {
@@ -118,11 +124,13 @@ func runTail(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	return cloudrun.StreamLogs(ctx, projectID, filter)
+	return cloudrun.StreamLogs(ctx, projectID, filter, logPrefix)
 }
 
 // parseTailPath splits a Cloud Run path into (scheme, name, execution).
+// Trailing slashes are stripped so "jobs://my-job/" → name "my-job".
 func parseTailPath(path string) (scheme, name, execution string) {
+	path = strings.TrimRight(path, "/")
 	for _, s := range []string{"svc", "jobs", "worker"} {
 		prefix := s + "://"
 		if strings.HasPrefix(path, prefix) {

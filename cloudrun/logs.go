@@ -97,7 +97,7 @@ func FetchLogs(ctx context.Context, projectID, filter string, n int) ([]*logging
 
 // StreamLogs streams live log entries to stdout using gRPC TailLogEntries.
 // Blocks until ctx is cancelled.
-func StreamLogs(ctx context.Context, projectID, filter string) error {
+func StreamLogs(ctx context.Context, projectID, filter, prefix string) error {
 	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/logging.read")
 	if err != nil {
 		return fmt.Errorf("getting credentials: %w", err)
@@ -132,7 +132,7 @@ func StreamLogs(ctx context.Context, projectID, filter string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Streaming logs... (Ctrl+C to stop)\n")
-	f := NewLogFormatter()
+	f := NewLogFormatter(prefix)
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -147,9 +147,9 @@ func StreamLogs(ctx context.Context, projectID, filter string) error {
 	}
 }
 
-// PrintLogs prints log entries to stdout.
-func PrintLogs(entries []*logging.Entry) {
-	f := NewLogFormatter()
+// PrintLogs prints log entries to stdout with an optional prefix label.
+func PrintLogs(entries []*logging.Entry, prefix string) {
+	f := NewLogFormatter(prefix)
 	for _, e := range entries {
 		f.PrintEntry(os.Stdout, e)
 	}
@@ -197,23 +197,28 @@ func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
 
 // LogFormatter handles colored log output.
 type LogFormatter struct {
-	useColors  bool
-	errorColor *color.Color
-	warnColor  *color.Color
-	infoColor  *color.Color
-	debugColor *color.Color
+	useColors   bool
+	prefix      string // optional prefix shown before each line, e.g. "legacy-mysql-to-bq"
+	prefixColor *color.Color
+	errorColor  *color.Color
+	warnColor   *color.Color
+	infoColor   *color.Color
+	debugColor  *color.Color
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
-func NewLogFormatter() *LogFormatter {
+// prefix is an optional label prepended to every line (empty = no prefix).
+func NewLogFormatter(prefix string) *LogFormatter {
 	fileInfo, _ := os.Stdout.Stat()
 	useColors := (fileInfo.Mode() & os.ModeCharDevice) != 0
 	return &LogFormatter{
-		useColors:  useColors,
-		errorColor: color.New(color.FgRed),
-		warnColor:  color.New(color.FgYellow),
-		infoColor:  color.New(color.FgCyan),
-		debugColor: color.New(color.Faint),
+		useColors:   useColors,
+		prefix:      prefix,
+		prefixColor: color.New(color.FgHiBlue),
+		errorColor:  color.New(color.FgRed),
+		warnColor:   color.New(color.FgYellow),
+		infoColor:   color.New(color.FgCyan),
+		debugColor:  color.New(color.Faint),
 	}
 }
 
@@ -236,7 +241,15 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 		}
 	}
 
-	fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, extractLogMessage(entry))
+	if f.prefix != "" {
+		pfx := fmt.Sprintf("[%s] ", f.prefix)
+		if f.useColors {
+			pfx = f.prefixColor.Sprint(pfx)
+		}
+		fmt.Fprintf(w, "%s%s %s %s\n", pfx, timeStr, severityStr, extractLogMessage(entry))
+	} else {
+		fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, extractLogMessage(entry))
+	}
 }
 
 // extractLogMessage extracts a readable message from a log entry.
