@@ -136,6 +136,24 @@ func FetchLogs(ctx context.Context, projectID, filter string, n int) ([]*logging
 	return entries, nil
 }
 
+// FetchLogsMultiJob fetches n log entries per job name, merges, and returns
+// them in chronological order (oldest first).
+func FetchLogsMultiJob(ctx context.Context, projectID, region string, jobNames []string, execution string, n int) ([]*logging.Entry, error) {
+	var all []*logging.Entry
+	for _, jobName := range jobNames {
+		f := LogFilter(projectID, region, "jobs", jobName, execution)
+		entries, err := FetchLogs(ctx, projectID, f, n)
+		if err != nil {
+			return nil, fmt.Errorf("fetching logs for job %s: %w", jobName, err)
+		}
+		all = append(all, entries...)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Timestamp.Before(all[j].Timestamp)
+	})
+	return all, nil
+}
+
 // StreamLogs streams live log entries to stdout using gRPC TailLogEntries.
 // Blocks until ctx is cancelled.
 // When fixedPrefix is true, the prefix label is always shown as-is (no label extraction).

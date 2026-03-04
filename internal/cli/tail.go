@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"cloud.google.com/go/logging"
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/cloudrun"
 	"github.com/thieso2/cio/resolver"
@@ -88,25 +89,25 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// When the job name contains wildcards, expand to concrete names first —
 	// Cloud Logging filters cannot handle glob patterns.
 	var filter string
+	var matchedJobs []string // non-nil only when wildcard was expanded
 	if scheme == "jobs" && strings.ContainsAny(name, "*?") {
 		ctx0 := context.Background()
 		jobs, err := cloudrun.ListJobs(ctx0, projectID, region)
 		if err != nil {
 			return fmt.Errorf("expanding job wildcard: %w", err)
 		}
-		var matched []string
 		for _, j := range jobs {
 			if ok, _ := path.Match(name, j.Name); ok {
-				matched = append(matched, j.Name)
+				matchedJobs = append(matchedJobs, j.Name)
 			}
 		}
-		if len(matched) == 0 {
+		if len(matchedJobs) == 0 {
 			return fmt.Errorf("no jobs match pattern %q", name)
 		}
 		if verbose {
-			fmt.Fprintf(os.Stderr, "Matched jobs: %s\n", strings.Join(matched, ", "))
+			fmt.Fprintf(os.Stderr, "Matched jobs: %s\n", strings.Join(matchedJobs, ", "))
 		}
-		filter = cloudrun.LogFilterMultiJob(region, matched, execution)
+		filter = cloudrun.LogFilterMultiJob(region, matchedJobs, execution)
 	} else {
 		filter = cloudrun.LogFilter(projectID, region, scheme, name, execution)
 	}
@@ -131,8 +132,14 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Always fetch historical lines first
-	entries, err := cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
+	// Fetch historical lines: n lines per job when wildcard was expanded,
+	// otherwise n lines total.
+	var entries []*logging.Entry
+	if len(matchedJobs) > 1 {
+		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines)
+	} else {
+		entries, err = cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
