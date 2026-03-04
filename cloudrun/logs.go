@@ -299,23 +299,55 @@ func extractLogMessage(entry *logging.Entry) string {
 }
 
 // extractFromLogMap extracts a message from a structured map payload.
+// If the map looks like slog output (has "msg" or "message" plus extra fields),
+// the extra key-value pairs are appended to the message.
 func extractFromLogMap(m map[string]interface{}) string {
+	// Fields that are never shown as extra key-value pairs.
+	metaKeys := map[string]bool{
+		"msg": true, "message": true, "text": true,
+		"level": true, "severity": true,
+		"time": true, "timestamp": true,
+		"labels": true, "resource": true, "insertId": true,
+	}
+
+	var msgKey string
 	for _, key := range []string{"message", "msg", "text"} {
 		if v, ok := m[key].(string); ok && v != "" {
-			return v
+			msgKey = key
+			_ = v
+			break
 		}
 	}
+
+	if msgKey != "" {
+		msg := m[msgKey].(string)
+		// Collect remaining structured fields (slog-style extras).
+		var extras []string
+		for k, v := range m {
+			if metaKeys[k] {
+				continue
+			}
+			s := fmt.Sprintf("%v", v)
+			if len(s) > 100 {
+				s = s[:100] + "..."
+			}
+			extras = append(extras, fmt.Sprintf("%s=%s", k, s))
+		}
+		sort.Strings(extras)
+		if len(extras) > 0 {
+			return msg + "  " + strings.Join(extras, " ")
+		}
+		return msg
+	}
+
 	if httpReq, ok := m["httpRequest"].(map[string]interface{}); ok {
 		return formatHTTPLogMap(httpReq)
 	}
-	// Fallback: format non-noisy fields
-	skip := map[string]bool{
-		"labels": true, "resource": true, "insertId": true,
-		"severity": true, "timestamp": true, "time": true,
-	}
+
+	// Fallback: format non-noisy fields.
 	var parts []string
 	for k, v := range m {
-		if skip[k] {
+		if metaKeys[k] {
 			continue
 		}
 		s := fmt.Sprintf("%v", v)
@@ -324,6 +356,7 @@ func extractFromLogMap(m map[string]interface{}) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
 	}
+	sort.Strings(parts)
 	return strings.Join(parts, " ")
 }
 
