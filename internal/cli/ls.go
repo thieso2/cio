@@ -21,12 +21,14 @@ var (
 	lsRaw           bool
 	lsSortBySize    bool
 	lsSortByTime    bool
+	lsActiveOnly    bool
+	lsAll           bool
 )
 
 var lsCmd = &cobra.Command{
 	Use:   "ls <path>",
-	Short: "List GCS buckets/objects or BigQuery datasets/tables",
-	Long: `List GCS buckets, objects, or BigQuery datasets/tables using an alias or full path.
+	Short: "List GCS buckets/objects, BigQuery datasets/tables, or Dataflow jobs",
+	Long: `List GCS buckets, objects, BigQuery datasets/tables, or Dataflow jobs using an alias or full path.
 
 The path can be either:
   - An alias (with : prefix): ':am', ':am/2024/', ':am/2024/01/data.txt'
@@ -35,6 +37,7 @@ The path can be either:
   - A full BigQuery path: 'bq://project-id', 'bq://project-id.dataset'
   - List all datasets: 'bq://' (uses default project from config)
   - Wildcard pattern: ':am/logs/*.log', ':am/data/2024-*.csv'
+  - Dataflow jobs: 'dataflow://' (all jobs), 'dataflow://pattern*', --active for active only
 
 Examples (GCS):
   # List buckets in a project
@@ -54,7 +57,27 @@ Examples (BigQuery):
 
   # List tables in dataset
   cio ls :mydata
-  cio ls ':mydata.events_*'`,
+  cio ls ':mydata.events_*'
+
+Examples (Cloud Run Jobs):
+  # List executions (active only by default, newest first)
+  cio ls -l jobs://my-job/
+
+  # List all executions (include completed/failed)
+  cio ls -la jobs://my-job/
+
+Examples (Dataflow):
+  # List all Dataflow jobs (active + terminated)
+  cio ls dataflow://
+
+  # List only active jobs
+  cio ls --active dataflow://
+
+  # List jobs matching a pattern
+  cio ls 'dataflow://my-pipeline*'
+
+  # Long format with state, type, created time
+  cio ls -l dataflow://`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -66,7 +89,7 @@ Examples (BigQuery):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -100,6 +123,8 @@ Examples (BigQuery):
 			MaxResults:    lsMaxResults,
 			ProjectID:     cfg.Defaults.ProjectID,
 			Region:        cfg.Defaults.Region,
+			ActiveOnly:    lsActiveOnly,
+			AllStatuses:   lsAll,
 		}
 
 		resources, err := res.List(ctx, fullPath, options)
@@ -107,8 +132,14 @@ Examples (BigQuery):
 			return fmt.Errorf("failed to list resources: %w", err)
 		}
 
-		// Sort resources
-		sortResources(resources, lsSortBySize, lsSortByTime)
+		// Sort resources — Cloud Run and Dataflow default to newest first
+		sortByTime := lsSortByTime
+		if !lsSortBySize && !lsSortByTime {
+			if resolver.IsCloudRunPath(fullPath) || resolver.IsDataflowPath(fullPath) {
+				sortByTime = true
+			}
+		}
+		sortResources(resources, lsSortBySize, sortByTime)
 
 		// Handle empty results
 		if len(resources) == 0 {
@@ -134,7 +165,7 @@ Examples (BigQuery):
 		// Print header for long format if resource type provides one
 		if lsLongFormat {
 			var header string
-			if resolver.IsCloudRunPath(fullPath) {
+			if resolver.IsCloudRunPath(fullPath) || resolver.IsDataflowPath(fullPath) {
 				header = resource.FormatLongHeaderDynamic(resources)
 			} else {
 				header = res.FormatLongHeader()
@@ -214,6 +245,8 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsRaw, "raw", false, "output only resource names, one per line (useful for scripting)")
 	lsCmd.Flags().BoolVarP(&lsSortBySize, "sort-size", "S", false, "sort by size (largest first)")
 	lsCmd.Flags().BoolVarP(&lsSortByTime, "sort-time", "t", false, "sort by modification time (newest first)")
+	lsCmd.Flags().BoolVar(&lsActiveOnly, "active", false, "show only active jobs (Dataflow)")
+	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "show all statuses (include completed/failed executions)")
 
 	// Add to root command
 	rootCmd.AddCommand(lsCmd)

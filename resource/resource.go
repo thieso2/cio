@@ -41,6 +41,8 @@ type ListOptions struct {
 	Pattern       string // Wildcard pattern (if applicable)
 	ProjectID     string // GCP Project ID (for bucket listing and Cloud Run)
 	Region        string // GCP Region (for Cloud Run)
+	ActiveOnly    bool   // Only show active resources (for Dataflow)
+	AllStatuses   bool   // Show all statuses (e.g., include completed executions)
 }
 
 // RemoveOptions contains options for removing resources
@@ -48,7 +50,9 @@ type RemoveOptions struct {
 	Recursive   bool
 	Force       bool
 	Verbose     bool
-	Parallelism int // Number of parallel operations (for GCS only)
+	Parallelism int    // Number of parallel operations (for GCS only)
+	Project     string // GCP Project ID (for Cloud Run)
+	Region      string // GCP Region (for Cloud Run)
 }
 
 // PathComponents represents parsed path components

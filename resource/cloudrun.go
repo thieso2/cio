@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/thieso2/cio/cloudrun"
+	"github.com/thieso2/cio/dataflow"
 )
 
 const (
@@ -58,6 +59,7 @@ func (r *CloudRunResource) List(ctx context.Context, path string, opts *ListOpti
 	case "svc":
 		return r.listServices(ctx, project, region)
 	case "jobs":
+		showAll := opts != nil && opts.AllStatuses
 		nameHasWildcard := strings.ContainsAny(p.name, "*?")
 		if p.name == "" {
 			return r.listJobs(ctx, project, region)
@@ -65,9 +67,9 @@ func (r *CloudRunResource) List(ctx context.Context, path string, opts *ListOpti
 		if nameHasWildcard {
 			// Pattern like jobs://legacy*  → filtered job list
 			// Pattern like jobs://legacy*/* → executions for all matching jobs
-			return r.listJobsOrExecutionsByPattern(ctx, project, region, p.name, p.execution)
+			return r.listJobsOrExecutionsByPattern(ctx, project, region, p.name, p.execution, showAll)
 		}
-		return r.listExecutions(ctx, project, region, p.name)
+		return r.listExecutions(ctx, project, region, p.name, showAll)
 	case "worker":
 		return r.listWorkerPools(ctx, project, region)
 	default:
@@ -140,7 +142,7 @@ func (r *CloudRunResource) listJobs(ctx context.Context, project, region string)
 // listJobsOrExecutionsByPattern handles wildcard job-name patterns.
 // When execution is "*" it lists executions for every matching job;
 // otherwise it returns the matching jobs themselves.
-func (r *CloudRunResource) listJobsOrExecutionsByPattern(ctx context.Context, project, region, namePattern, execution string) ([]*ResourceInfo, error) {
+func (r *CloudRunResource) listJobsOrExecutionsByPattern(ctx context.Context, project, region, namePattern, execution string, showAll bool) ([]*ResourceInfo, error) {
 	jobs, err := cloudrun.ListJobs(ctx, project, region)
 	if err != nil {
 		return nil, err
@@ -176,7 +178,7 @@ func (r *CloudRunResource) listJobsOrExecutionsByPattern(ctx context.Context, pr
 	r.lastScheme = "jobs-executions"
 	var resources []*ResourceInfo
 	for _, job := range matched {
-		execs, err := r.listExecutions(ctx, project, region, job.Name)
+		execs, err := r.listExecutions(ctx, project, region, job.Name, showAll)
 		if err != nil {
 			return nil, err
 		}
@@ -185,13 +187,17 @@ func (r *CloudRunResource) listJobsOrExecutionsByPattern(ctx context.Context, pr
 	return resources, nil
 }
 
-func (r *CloudRunResource) listExecutions(ctx context.Context, project, region, jobName string) ([]*ResourceInfo, error) {
+func (r *CloudRunResource) listExecutions(ctx context.Context, project, region, jobName string, showAll bool) ([]*ResourceInfo, error) {
 	executions, err := cloudrun.ListExecutions(ctx, project, region, jobName)
 	if err != nil {
 		return nil, err
 	}
 	var resources []*ResourceInfo
 	for _, exec := range executions {
+		// By default only show active (Running/Pending) executions; -a shows all
+		if !showAll && (exec.Status == "Succeeded" || exec.Status == "Failed") {
+			continue
+		}
 		resources = append(resources, &ResourceInfo{
 			Name:     exec.Name,
 			Path:     "jobs://" + jobName + "/" + exec.Name,
@@ -223,9 +229,104 @@ func (r *CloudRunResource) listWorkerPools(ctx context.Context, project, region 
 	return resources, nil
 }
 
-// Remove is not supported for Cloud Run resources.
-func (r *CloudRunResource) Remove(ctx context.Context, path string, opts *RemoveOptions) error {
-	return fmt.Errorf("removing Cloud Run resources via cio is not supported (use gcloud or the console)")
+// Remove deletes Cloud Run job executions.
+// Supports:
+//   - jobs://job-name/execution-name  → delete a specific execution
+//   - jobs://job-name/*               → delete all completed/failed executions
+func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOptions) error {
+	parsed := parseCloudRunPath(p)
+	if parsed.scheme != "jobs" || parsed.name == "" {
+		return fmt.Errorf("rm only supports Cloud Run job executions (jobs://job-name/execution-name)")
+	}
+	if parsed.execution == "" {
+		return fmt.Errorf("rm requires an execution name: jobs://job-name/execution-name or jobs://job-name/*")
+	}
+
+	var project, region string
+	if opts != nil {
+		project = opts.Project
+		region = opts.Region
+	}
+	if project == "" {
+		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
+	}
+	if region == "" {
+		return fmt.Errorf("region is required (use --region flag or set defaults.region in config)")
+	}
+
+	// Single execution deletion
+	if parsed.execution != "*" && !strings.ContainsAny(parsed.execution, "*?") {
+		if opts == nil || !opts.Force {
+			fmt.Printf("Remove execution %s? (y/N): ", parsed.execution)
+			var response string
+			fmt.Scanln(&response)
+			if response != "y" && response != "Y" {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+		}
+		if err := cloudrun.DeleteExecution(ctx, project, region, parsed.name, parsed.execution); err != nil {
+			return err
+		}
+		fmt.Printf("Deleted: %s\n", parsed.execution)
+		return nil
+	}
+
+	// Wildcard: list executions and delete non-running ones
+	executions, err := cloudrun.ListExecutions(ctx, project, region, parsed.name)
+	if err != nil {
+		return err
+	}
+
+	// Filter: only delete completed/failed executions (skip Running/Pending)
+	var toDelete []*cloudrun.ExecutionInfo
+	for _, exec := range executions {
+		if exec.Status == "Running" || exec.Status == "Pending" {
+			continue
+		}
+		if parsed.execution != "*" {
+			if ok, _ := path.Match(parsed.execution, exec.Name); !ok {
+				continue
+			}
+		}
+		toDelete = append(toDelete, exec)
+	}
+
+	if len(toDelete) == 0 {
+		fmt.Println("No completed/failed executions found to remove.")
+		return nil
+	}
+
+	// Show what will be deleted
+	fmt.Printf("Found %d completed/failed execution(s) to remove:\n", len(toDelete))
+	for _, exec := range toDelete {
+		fmt.Printf("  - %s (%s)\n", exec.Name, exec.Status)
+	}
+	fmt.Println()
+
+	// Confirm unless force
+	if opts == nil || !opts.Force {
+		fmt.Printf("Remove all %d execution(s)? (y/N): ", len(toDelete))
+		var response string
+		fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	// Delete executions
+	for _, exec := range toDelete {
+		if opts != nil && opts.Verbose {
+			fmt.Printf("Deleting %s...\n", exec.Name)
+		}
+		if err := cloudrun.DeleteExecution(ctx, project, region, parsed.name, exec.Name); err != nil {
+			return err
+		}
+		fmt.Printf("Deleted: %s\n", exec.Name)
+	}
+
+	return nil
 }
 
 // Info returns detailed information about a Cloud Run resource.
@@ -299,6 +400,8 @@ func FormatLongHeaderDynamic(resources []*ResourceInfo) string {
 		return cloudrun.ExecutionLongHeader()
 	case *cloudrun.WorkerPoolInfo:
 		return cloudrun.WorkerPoolLongHeader()
+	case *dataflow.JobInfo:
+		return dataflow.JobLongHeader()
 	}
 	return ""
 }

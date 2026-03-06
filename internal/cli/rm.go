@@ -16,8 +16,8 @@ var (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <path>",
-	Short: "Remove objects from GCS or BigQuery",
-	Long: `Remove objects from Google Cloud Storage or BigQuery tables/datasets.
+	Short: "Remove objects from GCS, BigQuery, or Cloud Run executions",
+	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, or Cloud Run job executions.
 
 Examples (GCS):
   cio rm :am/2024/data.csv
@@ -29,7 +29,17 @@ Examples (BigQuery):
   cio rm ':mydata.temp_*'
   cio rm -r :mydata
 
-CAUTION: Deleted objects and tables cannot be recovered.`,
+Examples (Cloud Run Jobs):
+  # Remove a specific execution
+  cio rm jobs://my-job/my-job-abc123
+
+  # Remove all completed/failed executions (skips running ones)
+  cio rm 'jobs://my-job/*'
+
+  # Force remove without confirmation
+  cio rm -f 'jobs://my-job/*'
+
+CAUTION: Deleted objects, tables, and executions cannot be recovered.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -40,8 +50,8 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 		var err error
 		var inputWasAlias bool
 
-		// If it's already a gs:// or bq:// path, use it directly
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) {
+		// If it's already a direct path, use it as-is
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -69,6 +79,17 @@ CAUTION: Deleted objects and tables cannot be recovered.`,
 		res, err := factory.Create(fullPath)
 		if err != nil {
 			return err
+		}
+
+		// Cloud Run handles its own listing/confirmation in Remove
+		if resolver.IsCloudRunPath(fullPath) {
+			options := &resource.RemoveOptions{
+				Force:   rmForce,
+				Verbose: verbose,
+				Project: cfg.Defaults.ProjectID,
+				Region:  cfg.Defaults.Region,
+			}
+			return res.Remove(ctx, fullPath, options)
 		}
 
 		// Parse path to check for wildcards
