@@ -27,7 +27,7 @@ var (
 
 var lsCmd = &cobra.Command{
 	Use:   "ls <path>",
-	Short: "List GCS buckets/objects, BigQuery datasets/tables, or Dataflow jobs",
+	Short: "List GCS buckets/objects, BigQuery datasets/tables, Dataflow jobs, or VMs",
 	Long: `List GCS buckets, objects, BigQuery datasets/tables, or Dataflow jobs using an alias or full path.
 
 The path can be either:
@@ -38,6 +38,8 @@ The path can be either:
   - List all datasets: 'bq://' (uses default project from config)
   - Wildcard pattern: ':am/logs/*.log', ':am/data/2024-*.csv'
   - Dataflow jobs: 'dataflow://' (all jobs), 'dataflow://pattern*', --active for active only
+  - VM zones: 'vm://' (list zones with instance counts)
+  - VM instances: 'vm://zone', 'vm://zone/pattern*', 'vm://*/pattern*' (all zones)
 
 Examples (GCS):
   # List buckets in a project
@@ -77,7 +79,23 @@ Examples (Dataflow):
   cio ls 'dataflow://my-pipeline*'
 
   # Long format with state, type, created time
-  cio ls -l dataflow://`,
+  cio ls -l dataflow://
+
+Examples (VM):
+  # List zones with instance counts
+  cio ls vm://
+
+  # List instances in a specific zone
+  cio ls vm://europe-west3-a
+
+  # List instances matching a pattern in a zone
+  cio ls 'vm://europe-west3-a/web-*'
+
+  # List instances matching a pattern across all zones
+  cio ls 'vm://*/iomp*'
+
+  # Long format with status, machine type, IP
+  cio ls -l vm://europe-west3-a`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -89,7 +107,7 @@ Examples (Dataflow):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {

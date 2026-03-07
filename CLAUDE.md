@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, and IAM that replaces lengthy `gcloud storage`, `bq`, and `gcloud iam` commands with short, memorable aliases. It maps user-defined aliases to full GCS bucket paths, BigQuery paths, and IAM paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls :mydata` instead of `bq ls project-id:dataset`.
+`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, and Compute Engine that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
 
 **Alias Syntax:**
 - Aliases are prefixed with `:` to distinguish them from regular paths
@@ -12,18 +12,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Used with `:` prefix: `cio ls :am/path/` or `cio ls :mydata`
 
 **Key capabilities:**
-- Alias-based path resolution for GCS, BigQuery, and IAM
+- Alias-based path resolution for GCS, BigQuery, IAM, Cloud Run, Dataflow, and VM
   - GCS: `:am` → `gs://bucket-name/`
   - BigQuery: `:mydata` → `bq://project-id.dataset`
   - IAM: Direct paths like `iam://project-id/service-accounts`
-- Familiar Unix-like commands (`ls`, `cp`, `rm` with various flags)
-- Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS commands
+  - Cloud Run: `svc://`, `jobs://`, `worker://`
+  - Dataflow: `dataflow://`
+  - VM: `vm://zone/instance-name`
+- Familiar Unix-like commands (`ls`, `cp`, `rm`, `stop`, `tail` with various flags)
+- Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS and VM commands
 - BigQuery listing: datasets, tables, and table schemas
 - BigQuery interactive SQL shell with proper horizontal scrolling (peterh/liner)
 - IAM listing: service accounts with metadata
+- Compute Engine: list zones/instances, stop/delete VMs (parallel), tail logs and serial port
+- Cloud Run & Dataflow: list resources, tail/stream logs, manage executions
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
-- Singleton client pattern for performance (GCS, BigQuery, and IAM)
+- Singleton client pattern for performance (GCS, BigQuery, IAM, Cloud Run, Dataflow, Compute)
 - Bidirectional file transfer (local ↔ GCS) with parallel chunked downloads
 - FUSE filesystem support for GCS, BigQuery, and IAM (experimental)
 
@@ -78,14 +83,19 @@ graph TB
         Info["info.go<br/>(Table info)"]
         Cp["cp.go<br/>(Copy files)"]
         Rm["rm.go<br/>(Remove resources)"]
+        Stop["stop.go<br/>(Stop VMs)"]
+        Tail["tail.go<br/>(Log streaming)"]
     end
 
-    subgraph "Resource Layer (internal/resource/)"
+    subgraph "Resource Layer (resource/)"
         Factory["Factory<br/>(Create handlers)"]
         Interface["Resource Interface<br/>(List, Remove, Info)"]
         GCSRes["GCSResource"]
         BQRes["BigQueryResource"]
         IAMRes["IAMResource"]
+        CRRes["CloudRunResource"]
+        DFRes["DataflowResource"]
+        VMRes["VMResource"]
     end
 
     subgraph "Resolution Layer"
@@ -98,12 +108,18 @@ graph TB
         StorageClient["Storage Client<br/>(sync.Once)"]
         BQClient["BigQuery Client<br/>(sync.Once)"]
         IAMClient["IAM Client<br/>(sync.Once)"]
+        CRClient["Cloud Run Client<br/>(sync.Once)"]
+        DFClient["Dataflow Client<br/>(sync.Once)"]
+        ComputeClient["Compute Client<br/>(sync.Once)"]
     end
 
     subgraph "Google Cloud APIs"
         GCSAPI["Cloud Storage API"]
         BQAPI["BigQuery API"]
         IAMAPI["IAM API"]
+        CRAPI["Cloud Run API"]
+        DFAPI["Dataflow API"]
+        ComputeAPI["Compute Engine API"]
     end
 
     Root --> Map
@@ -111,11 +127,15 @@ graph TB
     Root --> Info
     Root --> Cp
     Root --> Rm
+    Root --> Stop
+    Root --> Tail
 
     Ls --> Resolver
     Info --> Resolver
     Cp --> Resolver
     Rm --> Resolver
+    Stop --> Resolver
+    Tail --> Resolver
 
     Resolver --> Config
     Resolver --> Factory
@@ -125,20 +145,29 @@ graph TB
     Interface --> GCSRes
     Interface --> BQRes
     Interface --> IAMRes
+    Interface --> CRRes
+    Interface --> DFRes
+    Interface --> VMRes
 
     GCSRes --> StorageClient
     BQRes --> BQClient
     IAMRes --> IAMClient
+    CRRes --> CRClient
+    DFRes --> DFClient
+    VMRes --> ComputeClient
 
     StorageClient --> GCSAPI
     BQClient --> BQAPI
     IAMClient --> IAMAPI
+    CRClient --> CRAPI
+    DFClient --> DFAPI
+    ComputeClient --> ComputeAPI
 ```
 
 ### Core Components
 
-**0. Resource Abstraction Layer (`internal/resource/`)**
-- **Unified interface** for all resource types (GCS, BigQuery, IAM)
+**0. Resource Abstraction Layer (`resource/`)**
+- **Unified interface** for all resource types (GCS, BigQuery, IAM, Cloud Run, Dataflow, VM)
 - `Resource` interface defines common operations:
   - `List()` - list resources at a path
   - `Remove()` - delete resources
@@ -149,6 +178,9 @@ graph TB
   - `GCSResource` - handles GCS objects and directories
   - `BigQueryResource` - handles BigQuery datasets and tables
   - `IAMResource` - handles IAM service accounts
+  - `CloudRunResource` - handles Cloud Run services, jobs, executions, worker pools
+  - `DataflowResource` - handles Dataflow jobs
+  - `VMResource` - handles Compute Engine VM instances and zones
 - `Factory` - creates appropriate resource handler based on path type
 - `ResourceInfo` - unified data structure for resource metadata
 - Benefits:
@@ -172,6 +204,9 @@ graph TB
   - `IsGCSPath()` checks for `gs://` prefix
   - `IsBQPath()` checks for `bq://` prefix
   - `IsIAMPath()` checks for `iam://` prefix
+  - `IsCloudRunPath()` checks for `svc://`, `jobs://`, `worker://` prefixes
+  - `IsDataflowPath()` checks for `dataflow://` prefix
+  - `IsVMPath()` checks for `vm://` prefix
 - **Important**: Input must start with `:` for alias paths (e.g., `:am/path` or `:mydata`)
 
 **2. Configuration System (`internal/config/`)**
@@ -213,12 +248,23 @@ graph TB
 - `ServiceAccountInfo` type for formatting service account results
 - `Close()` should be called when program exits
 
+**3d. Compute Engine Client (`compute/`)**
+- **Singleton pattern**: `GetInstancesClient()` uses `sync.Once` to create Compute client once per process
+- Authentication via ADC (Application Default Credentials)
+- Operations:
+  - `ListInstances()` - lists instances in a zone or across all zones (aggregated)
+  - `StopInstance()` - stops a running VM instance
+  - `DeleteInstance()` - deletes a VM instance
+  - `GetSerialPortOutput()` - fetches serial port output (for log tailing)
+- `InstanceInfo` type for formatting VM instance results
+- `Close()` should be called when program exits
+
 **4. CLI Commands (`internal/cli/`)**
 - **root.go**: Global flags (`--config`, `--project`, `--region`, `--verbose`)
   - `PersistentPreRunE` loads config and overrides with CLI flags
 - **map.go**: Manage alias mappings (`map <alias> <path>`, `map list`, `map show`, `map delete`)
   - Aliases created without `:` but used with it
-- **ls.go**: List GCS objects, BigQuery datasets/tables, or IAM service accounts
+- **ls.go**: List GCS objects, BigQuery datasets/tables, IAM, Cloud Run, Dataflow, or VMs
   - GCS: formatting options (`-l`, `-r`, `--human-readable`, `--max-results`)
   - GCS wildcards: `cio ls ':am/logs/*.log'`
   - BigQuery: lists datasets (`bq://project`) or tables (`bq://project.dataset`)
@@ -226,8 +272,9 @@ graph TB
   - BigQuery `-l` shows type, size, and row counts
   - IAM: lists service accounts (`iam://project-id/service-accounts`)
   - IAM `-l` shows email, display name, and disabled status
+  - VM: `vm://` lists zones, `vm://zone` lists instances, `vm://*/pattern*` wildcards
+  - VM `-l` shows status, machine type, zone, IP, created time
   - Output uses alias format: `:am/file.txt` or `:mydata.table1`
-  - `handleBigQueryList()` function handles BigQuery-specific listing
 - **info.go**: Show detailed BigQuery table information
   - Displays table schema with nested RECORD fields
   - Shows description, timestamps, location, size, row count
@@ -238,15 +285,29 @@ graph TB
   - Download: `cio cp :am/file.txt ./local/`
   - Wildcard download: `cio cp ':am/logs/*.log' ./local/`
   - Messages show alias paths: `Uploaded: file.txt → :am/path/file.txt`
-- **rm.go**: Remove GCS objects and BigQuery tables/datasets (`-r` recursive, `-f` force)
+- **rm.go**: Remove GCS objects, BigQuery tables/datasets, Cloud Run executions, or VMs
   - GCS wildcards: `cio rm ':am/temp/*.tmp'`
   - BigQuery tables: `cio rm :mydata.events`
   - BigQuery wildcards: `cio rm ':mydata.temp_*'`
   - BigQuery datasets: `cio rm -r :mydata` (removes all tables)
+  - VM: `cio rm vm://zone/name` (stops then deletes), wildcards with `vm://*/pattern*`
+  - VM operations run in parallel (stop all, then delete all)
   - Lists all matching items BEFORE deletion
   - Confirmation prompts unless `-f` is used
   - Displays alias paths in confirmations and output
   - **CRITICAL**: Only deletes when explicitly requested by user
+- **stop.go**: Stop VM instances (`cio stop`)
+  - Stops running instances in parallel, skips already-stopped ones
+  - Wildcard support: `cio stop 'vm://*/bastion-*'`
+  - Force flag (`-f`) to skip confirmation
+  - Shows instance list with status before confirmation
+- **tail.go**: Show/stream logs for Cloud Run, Dataflow, and VM
+  - Cloud Run: `cio tail svc://service`, `cio tail -f jobs://job-name`
+  - Dataflow: `cio tail dataflow://job-id`, `--log-type` filter
+  - VM Cloud Logging: `cio tail vm://zone/instance`, wildcards `vm://*/pattern*`
+  - VM serial port: `cio tail -f vm://zone/instance/serial`
+  - Multi-VM tailing: colored `[instance-name]` prefixes per instance
+  - `-f` for follow/stream mode, `-n N` for line count, `-s` for severity filter
 - **shell.go**: Interactive BigQuery SQL shell (`cio query`)
   - Uses `peterh/liner` for proper horizontal scrolling on long lines
   - Features:
@@ -326,12 +387,13 @@ flowchart TB
 
 ### CRITICAL SAFETY RULE - Data Deletion
 
-**UNDER NO CIRCUMSTANCES should anything be deleted from GCS or BigQuery unless EXPLICITLY requested by the user.**
+**UNDER NO CIRCUMSTANCES should anything be deleted from GCS, BigQuery, or Compute Engine unless EXPLICITLY requested by the user.**
 
 This rule applies to:
 - GCS objects and directories (`storage.RemoveObject`, `storage.RemoveDirectory`, `storage.RemoveWithPattern`)
 - BigQuery tables and datasets (`bigquery.RemoveTable`, `bigquery.RemoveDataset`, `bigquery.RemoveTablesWithPattern`)
-- ANY operation that uses the `rm` command or deletion functions
+- VM instances (`compute.StopInstance`, `compute.DeleteInstance`)
+- ANY operation that uses the `rm`, `stop`, or deletion functions
 
 **Rules:**
 1. NEVER proactively suggest or execute deletions
@@ -493,6 +555,19 @@ cio cp -j 1 --verbose gs://bucket/large.zip /tmp/
 - ✅ Confirmation prompts with preview of items to be deleted
 - ✅ Force flag (`-f`) to skip confirmations
 
+### Phase 6: Compute Engine (VM) Support - Completed
+- ✅ Compute Engine client with singleton pattern (`compute/`)
+- ✅ VM path format (`vm://zone/instance-name`)
+- ✅ List zones: `cio ls vm://` (with instance counts)
+- ✅ List instances: `cio ls vm://zone`, `cio ls -l vm://zone`
+- ✅ Wildcard support: `cio ls 'vm://*/iomp*'`, `cio ls 'vm://zone/web-*'`
+- ✅ All-zones listing: `cio ls vm://*/`
+- ✅ Stop instances: `cio stop 'vm://*/pattern*'` (parallel, with confirmation)
+- ✅ Delete instances: `cio rm vm://zone/name` (stop + delete, parallel)
+- ✅ Cloud Logging tail: `cio tail vm://zone/instance`, multi-VM with wildcards
+- ✅ Serial port tail: `cio tail -f vm://zone/instance/serial`
+- ✅ Parallel operations for stop/delete with verbose progress output
+
 ## Usage Examples
 
 ### GCS Examples
@@ -573,9 +648,46 @@ ls ~/gcs/iam/service-accounts/
 cat ~/gcs/iam/service-accounts/my-sa@project.iam.gserviceaccount.com/metadata.json
 ```
 
-## Future Features (Phase 6+)
-- BigQuery data operations (query, export, import)
+### VM (Compute Engine) Examples
+```bash
+# List zones with instance counts
+cio ls vm://
+
+# List instances in a zone
+cio ls vm://europe-west3-a
+
+# List instances with details (status, machine type, IP)
+cio ls -l vm://europe-west3-a
+
+# List all instances across all zones
+cio ls 'vm://*/'
+
+# List instances matching a pattern across all zones
+cio ls 'vm://*/iomp*'
+
+# Stop instances matching a pattern (parallel, with confirmation)
+cio stop 'vm://*/bastion-ephemeral*'
+
+# Force stop without confirmation
+cio stop -f 'vm://europe-west3-a/staging-*'
+
+# Stop and delete instances (parallel)
+cio rm 'vm://*/staging-*'
+
+# Force delete without confirmation
+cio rm -f vm://europe-west3-a/my-instance
+
+# Show VM Cloud Logging output
+cio tail vm://europe-west3-a/my-instance
+
+# Stream logs from multiple VMs matching a pattern
+cio tail -f 'vm://*/*-ingress*'
+
+# Stream serial port output
+cio tail -f vm://europe-west3-a/my-instance/serial
+```
+
+## Future Features (Phase 7+)
 - Web server for file browsing (config: `server.port`, `server.host`, `server.auto_start`)
 - Additional commands: `mv`, `cat`, `du`
 - GCS to GCS copy operations
-- BigQuery table schema display

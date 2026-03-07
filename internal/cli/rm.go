@@ -16,8 +16,8 @@ var (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <path>",
-	Short: "Remove objects from GCS, BigQuery, or Cloud Run executions",
-	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, or Cloud Run job executions.
+	Short: "Remove objects from GCS, BigQuery, Cloud Run, or Compute Engine",
+	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, Cloud Run job executions, or VM instances.
 
 Examples (GCS):
   cio rm :am/2024/data.csv
@@ -39,7 +39,20 @@ Examples (Cloud Run Jobs):
   # Force remove without confirmation
   cio rm -f 'jobs://my-job/*'
 
-CAUTION: Deleted objects, tables, and executions cannot be recovered.`,
+Examples (VM):
+  # Stop and delete a VM instance
+  cio rm vm://europe-west3-a/my-instance
+
+  # Stop and delete matching instances (all zones)
+  cio rm 'vm://*/staging-*'
+
+  # Stop and delete matching instances in a zone
+  cio rm 'vm://europe-west3-a/staging-*'
+
+  # Force remove without confirmation
+  cio rm -f vm://europe-west3-a/my-instance
+
+CAUTION: Deleted objects, tables, executions, and VMs cannot be recovered.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -51,7 +64,7 @@ CAUTION: Deleted objects, tables, and executions cannot be recovered.`,
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -81,8 +94,8 @@ CAUTION: Deleted objects, tables, and executions cannot be recovered.`,
 			return err
 		}
 
-		// Cloud Run handles its own listing/confirmation in Remove
-		if resolver.IsCloudRunPath(fullPath) {
+		// Cloud Run and VM handle their own listing/confirmation in Remove
+		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) {
 			options := &resource.RemoveOptions{
 				Force:   rmForce,
 				Verbose: verbose,

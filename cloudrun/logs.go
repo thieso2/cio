@@ -334,12 +334,19 @@ type LogFormatter struct {
 	prefixColorIdx int
 	maxLabelWidth  int      // widest [label] seen; used for column padding
 	knownJobs      []string // when set, maps execution names back to job names
+	labelKeys      []string // extra entry.Labels keys to try for the prefix (before fallbacks)
 }
 
 // SetKnownJobs tells the formatter about concrete job names so that execution
 // labels like "legacy-mysql-to-bq-lz5n5" are displayed as "legacy-mysql-to-bq".
 func (f *LogFormatter) SetKnownJobs(jobs []string) {
 	f.knownJobs = jobs
+}
+
+// SetLabelKeys sets extra entry.Labels keys to try when deriving the per-line
+// prefix (checked before the default run.googleapis.com/execution_name).
+func (f *LogFormatter) SetLabelKeys(keys []string) {
+	f.labelKeys = keys
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -405,8 +412,18 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 	if f.useFixedPrefix {
 		label = f.prefix
 	} else {
+		// Try configured label keys first (e.g. compute.googleapis.com/resource_name for VMs).
+		for _, key := range f.labelKeys {
+			if v := entry.Labels[key]; v != "" {
+				label = v
+				break
+			}
+		}
+		// Fall back to Cloud Run execution name.
 		execName := entry.Labels["run.googleapis.com/execution_name"]
-		label = execName
+		if label == "" {
+			label = execName
+		}
 		// If we know the concrete job names, map the execution name back to its job.
 		// Cloud Run execution names are always "{job-name}-{5-char-suffix}".
 		if execName != "" && len(f.knownJobs) > 0 {
@@ -425,19 +442,33 @@ func (f *LogFormatter) PrintEntry(w io.Writer, entry *logging.Entry) {
 			label = entry.Resource.Labels["job_name"]
 		}
 	}
+	// Task index for Cloud Run jobs (e.g. task 0, 1, 2 in parallel jobs).
+	taskStr := ""
+	if taskIdx, ok := entry.Labels["run.googleapis.com/task_index"]; ok {
+		taskStr = fmt.Sprintf("%3s", taskIdx)
+	}
+
 	if label != "" {
 		// Pad [label] to the widest seen so far so the timestamp column aligns.
 		raw := "[" + label + "]"
 		if len(raw) > f.maxLabelWidth {
 			f.maxLabelWidth = len(raw)
 		}
-		pfx := fmt.Sprintf("%-*s ", f.maxLabelWidth, raw)
+		pfx := fmt.Sprintf("%-*s", f.maxLabelWidth, raw)
 		if f.useColors {
 			pfx = f.prefixColor(label).Sprint(pfx)
 		}
-		fmt.Fprintf(w, "%s%s %s %s\n", pfx, timeStr, severityStr, f.formatMessage(entry))
+		if taskStr != "" {
+			fmt.Fprintf(w, "%s %s %s %s %s\n", pfx, taskStr, timeStr, severityStr, f.formatMessage(entry))
+		} else {
+			fmt.Fprintf(w, "%s %s %s %s\n", pfx, timeStr, severityStr, f.formatMessage(entry))
+		}
 	} else {
-		fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, f.formatMessage(entry))
+		if taskStr != "" {
+			fmt.Fprintf(w, "%s %s %s %s\n", taskStr, timeStr, severityStr, f.formatMessage(entry))
+		} else {
+			fmt.Fprintf(w, "%s %s %s\n", timeStr, severityStr, f.formatMessage(entry))
+		}
 	}
 }
 

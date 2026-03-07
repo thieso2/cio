@@ -1,8 +1,8 @@
 # cio — Cloud IO CLI Reference
 
-`cio` is a fast Go CLI for Google Cloud Storage (GCS), BigQuery, and IAM.
-It replaces verbose `gcloud storage` / `bq` commands with short aliases and
-Unix-style verbs.
+`cio` is a fast Go CLI for Google Cloud Storage (GCS), BigQuery, IAM,
+Cloud Run, Dataflow, and Compute Engine. It replaces verbose `gcloud` / `bq`
+commands with short aliases and Unix-style verbs.
 
 ## Alias System
 
@@ -18,7 +18,7 @@ cio map delete <alias>    # remove an alias
 - Created **without** `:` prefix: `cio map am gs://my-bucket/`
 - Used **with** `:` prefix: `cio ls :am/2024/`
 - Aliases cannot contain `/` or `.`
-- Supported path types: `gs://`, `bq://`
+- Supported path types: `gs://`, `bq://`, `svc://`, `jobs://`, `worker://`, `dataflow://`, `vm://`
 
 ```yaml
 # Example config: ~/.config/cio/config.yaml
@@ -60,6 +60,12 @@ cio ls <path> [flags]
 | `:mydata` | tables in a BigQuery dataset alias |
 | `bq://project.dataset` | tables by full BQ path |
 | `iam://project/service-accounts` | IAM service accounts |
+| `svc://service-name` | Cloud Run service revisions |
+| `jobs://job-name` | Cloud Run job executions |
+| `vm://` | Compute Engine zones with instance counts |
+| `vm://zone/` | VMs in a specific zone |
+| `vm://*/` | VMs across all zones |
+| `vm://*/pattern*` | VMs matching a wildcard across all zones |
 
 **Wildcards** (always quote in shell):
 
@@ -158,6 +164,21 @@ cio rm -r :mydata
 
 # Skip confirmation prompt
 cio rm -f ':am/old-data/*'
+
+# Remove a Cloud Run job execution
+cio rm jobs://my-job/my-job-abc123
+
+# Remove all completed/failed executions
+cio rm 'jobs://my-job/*'
+
+# Stop and delete a VM instance
+cio rm vm://europe-west3-a/my-instance
+
+# Stop and delete matching VMs (all zones, parallel)
+cio rm 'vm://*/staging-*'
+
+# Force remove without confirmation
+cio rm -f vm://europe-west3-a/my-instance
 ```
 
 **Flags**
@@ -168,6 +189,7 @@ cio rm -f ':am/old-data/*'
 | `-f` | force — skip confirmation |
 
 Always previews what will be deleted before asking for confirmation (unless `-f`).
+VM instances are stopped first, then deleted. Operations run in parallel.
 
 ---
 
@@ -317,6 +339,103 @@ Filesystem layout:
 
 ---
 
+### `cio stop` — Stop VM instances
+
+```
+cio stop <vm-path> [flags]
+```
+
+```bash
+# Stop a single instance
+cio stop vm://europe-west3-a/my-instance
+
+# Stop instances matching a pattern (all zones)
+cio stop 'vm://*/bastion-ephemeral*'
+
+# Stop instances in a specific zone
+cio stop 'vm://europe-west3-a/staging-*'
+
+# Force stop without confirmation
+cio stop -f 'vm://*/bastion-ephemeral*'
+```
+
+**Flags**
+
+| Flag | Meaning |
+|---|---|
+| `-f` | force — skip confirmation |
+
+Running instances are stopped in parallel. Already-stopped instances are skipped.
+
+---
+
+### `cio tail` — Stream logs
+
+```
+cio tail [-f] [-n N] <path> [flags]
+```
+
+```bash
+# Cloud Run service logs
+cio tail svc://my-service
+cio tail -f svc://my-service          # follow (stream live)
+
+# Cloud Run job execution logs
+cio tail jobs://my-job
+cio tail jobs://my-job/execution-id
+
+# Dataflow job logs
+cio tail dataflow://job-id
+cio tail --log-type worker dataflow://job-id
+
+# VM Cloud Logging output
+cio tail vm://europe-west3-a/my-instance
+cio tail -f vm://europe-west3-a/my-instance
+
+# VM serial port output
+cio tail vm://europe-west3-a/my-instance/serial
+cio tail -f vm://europe-west3-a/my-instance/serial
+
+# Multi-VM logs (wildcard, colored per-instance prefixes)
+cio tail -f 'vm://*/my-app-*'
+```
+
+**Flags**
+
+| Flag | Meaning |
+|---|---|
+| `-f` | follow — stream live logs |
+| `-n N` | number of recent entries to show (default 50) |
+| `-s` / `--severity` | minimum severity: DEBUG, INFO, WARNING, ERROR |
+| `--audit` | show only audit/admin-activity logs |
+| `--log-type` | Dataflow: `all` (default), `job`, `worker`, `step` |
+
+**Path formats**
+
+| Path | What it tails |
+|---|---|
+| `svc://service-name` | Cloud Run service logs |
+| `jobs://job-name` | Cloud Run job logs (all executions) |
+| `jobs://job-name/execution-id` | Specific execution logs |
+| `worker://pool-name` | Cloud Run worker pool logs |
+| `dataflow://job-id` | Dataflow job logs |
+| `vm://zone/instance-name` | VM Cloud Logging output |
+| `vm://zone/instance-name/serial` | VM serial port output |
+| `vm://*/pattern*` | Multi-VM logs across all zones |
+
+---
+
+### `cio show` — Show historical logs
+
+```
+cio show <path> [flags]
+```
+
+Same paths and flags as `tail` but fetches historical log entries instead of streaming.
+Use `-n` to control how many entries to fetch (default 50).
+
+---
+
 ## Global Flags
 
 | Flag | Meaning |
@@ -356,6 +475,17 @@ mise auth-setup
 | `bq://project.dataset` | dataset |
 | `bq://project.dataset.table` | table |
 | `iam://project/service-accounts` | IAM service accounts |
+| `svc://service-name` | Cloud Run service |
+| `jobs://job-name` | Cloud Run job |
+| `jobs://job-name/execution-id` | Cloud Run job execution |
+| `worker://pool-name` | Cloud Run worker pool |
+| `dataflow://job-id` | Dataflow job |
+| `vm://` | list all zones |
+| `vm://zone/` | VMs in a zone |
+| `vm://*/` | VMs in all zones |
+| `vm://zone/instance-name` | specific VM instance |
+| `vm://zone/instance-name/serial` | VM serial port (for tail) |
+| `vm://*/pattern*` | VMs matching wildcard across zones |
 
-Wildcards `*` and `?` are supported in GCS and BigQuery paths.
+Wildcards `*` and `?` are supported in GCS, BigQuery, and VM paths.
 Always quote wildcard paths in the shell: `':alias/logs/*.log'`

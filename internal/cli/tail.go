@@ -8,12 +8,15 @@ import (
 	"path"
 	"strings"
 	"syscall"
+	"time"
 
 	"cloud.google.com/go/logging"
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/cloudrun"
+	"github.com/thieso2/cio/compute"
 	"github.com/thieso2/cio/dataflow"
 	"github.com/thieso2/cio/resolver"
+	"github.com/thieso2/cio/resource"
 )
 
 var (
@@ -26,8 +29,8 @@ var (
 
 var tailCmd = &cobra.Command{
 	Use:   "tail [-f] [-n N] <path>",
-	Short: "Show or stream Cloud Run / Dataflow logs",
-	Long: `Show recent logs or stream live logs for Cloud Run services, jobs, workers, or Dataflow jobs.
+	Short: "Show or stream Cloud Run / Dataflow / VM logs",
+	Long: `Show recent logs or stream live logs for Cloud Run services, jobs, workers, Dataflow jobs, or VM instances.
 
 Paths:
   svc://service-name              Cloud Run service logs
@@ -35,6 +38,9 @@ Paths:
   jobs://job-name/execution-id    Logs for a specific execution
   worker://pool-name              Cloud Run worker pool logs
   dataflow://job-id               Dataflow job logs
+  vm://zone/instance-name         VM Cloud Logging output
+  vm://zone/instance-name/serial  VM serial port output
+  vm://*/pattern*                 VM logs across all zones (wildcard)
 
 Dataflow log types (--log-type):
   all      All log types with [J]/[W]/[S] prefix (default)
@@ -53,7 +59,16 @@ Examples:
   cio tail dataflow://2024-01-15_12_00_00-12345
 
   # Stream only step logs from a Dataflow job
-  cio tail -f --log-type step dataflow://2024-01-15_12_00_00-12345`,
+  cio tail -f --log-type step dataflow://2024-01-15_12_00_00-12345
+
+  # Show VM Cloud Logging output
+  cio tail vm://europe-west3-a/my-instance
+
+  # Stream logs from VMs matching a pattern (all zones)
+  cio tail -f 'vm://*/ingress*'
+
+  # Stream VM serial port output
+  cio tail -f vm://europe-west3-a/my-instance/serial`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTail,
 }
@@ -78,7 +93,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// Resolve alias if needed
 	r := resolver.Create(cfg)
 	var err error
-	if !resolver.IsCloudRunPath(inputPath) && !resolver.IsDataflowPath(inputPath) {
+	if !resolver.IsCloudRunPath(inputPath) && !resolver.IsDataflowPath(inputPath) && !resolver.IsVMPath(inputPath) {
 		inputPath, err = r.Resolve(inputPath)
 		if err != nil {
 			return err
@@ -90,9 +105,14 @@ func runTail(cmd *cobra.Command, args []string) error {
 		return runDataflowTail(inputPath)
 	}
 
+	// Dispatch to VM handler if applicable.
+	if resolver.IsVMPath(inputPath) {
+		return runVMTail(inputPath)
+	}
+
 	crPath := inputPath
 	if !resolver.IsCloudRunPath(crPath) {
-		return fmt.Errorf("tail only supports Cloud Run paths (svc://, jobs://, worker://) and Dataflow paths (dataflow://), got: %s", crPath)
+		return fmt.Errorf("tail only supports Cloud Run (svc://, jobs://, worker://), Dataflow (dataflow://), and VM (vm://) paths, got: %s", crPath)
 	}
 
 	projectID := cfg.Defaults.ProjectID
@@ -316,6 +336,184 @@ func runDataflowTail(dfPath string) error {
 	}()
 
 	return dataflow.StreamLogs(ctx, projectID, jobID, lt, tailSeverity, f)
+}
+
+// runVMTail handles tail/show for VM paths.
+// Supports wildcards — resolves to matching instances, then tails all of them.
+//
+//	vm://zone/instance-name         → Cloud Logging output (single VM)
+//	vm://zone/instance-name/serial  → serial port output (single VM only)
+//	vm://*/pattern*                 → Cloud Logging for matching VMs across all zones
+//	vm://zone/web-*                 → Cloud Logging for matching VMs in zone
+func runVMTail(vmPath string) error {
+	projectID := cfg.Defaults.ProjectID
+	if projectID == "" {
+		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
+	}
+
+	// Check for /serial suffix before matching
+	isSerial := strings.HasSuffix(vmPath, "/serial")
+	lookupPath := vmPath
+	if isSerial {
+		lookupPath = strings.TrimSuffix(vmPath, "/serial")
+	}
+
+	// Resolve wildcards to concrete instances
+	ctx := context.Background()
+	matched, err := resource.MatchVMInstances(ctx, lookupPath, projectID)
+	if err != nil {
+		return err
+	}
+	if len(matched) == 0 {
+		return fmt.Errorf("no VM instances match %s", lookupPath)
+	}
+
+	// Serial port output: only supported for a single instance
+	if isSerial {
+		if len(matched) > 1 {
+			return fmt.Errorf("serial port output only supports a single instance, but %d matched", len(matched))
+		}
+		return runVMSerialTail(projectID, matched[0].Zone, matched[0].Name)
+	}
+
+	// Cloud Logging: build filter for one or many instances
+	var names []string
+	for _, inst := range matched {
+		names = append(names, inst.Name)
+	}
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Matched VMs: %s\n", strings.Join(names, ", "))
+	}
+
+	return runVMCloudLogTail(projectID, matched)
+}
+
+// runVMSerialTail fetches and optionally follows serial port output.
+func runVMSerialTail(projectID, zone, instanceName string) error {
+	ctx := context.Background()
+
+	content, next, err := compute.GetSerialPortOutput(ctx, projectID, zone, instanceName, 0)
+	if err != nil {
+		return fmt.Errorf("failed to get serial port output: %w", err)
+	}
+
+	lines := strings.Split(content, "\n")
+	if len(lines) > tailNumLines {
+		lines = lines[len(lines)-tailNumLines:]
+	}
+	for _, line := range lines {
+		if line != "" {
+			fmt.Println(line)
+		}
+	}
+
+	if !tailFollow {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	go func() {
+		<-sigChan
+		fmt.Fprintln(os.Stderr, "\nInterrupted.")
+		cancel()
+	}()
+
+	fmt.Fprintf(os.Stderr, "Streaming serial port output... (Ctrl+C to stop)\n")
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+
+		content, newNext, err := compute.GetSerialPortOutput(ctx, projectID, zone, instanceName, next)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("failed to get serial port output: %w", err)
+		}
+		if newNext > next && content != "" {
+			fmt.Print(content)
+		}
+		next = newNext
+	}
+}
+
+// vmLogFilter builds a Cloud Logging filter for one or more VM instances.
+func vmLogFilter(instances []*compute.InstanceInfo, severity string) string {
+	var parts []string
+	parts = append(parts, `resource.type="gce_instance"`)
+
+	if len(instances) == 1 {
+		inst := instances[0]
+		parts = append(parts, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
+	} else {
+		var nameFilters []string
+		for _, inst := range instances {
+			nameFilters = append(nameFilters, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
+		}
+		parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
+	}
+
+	if severity != "" {
+		parts = append(parts, fmt.Sprintf(`severity>=%s`, strings.ToUpper(severity)))
+	}
+	return strings.Join(parts, " AND ")
+}
+
+// runVMCloudLogTail fetches and optionally streams Cloud Logging entries for VM instances.
+func runVMCloudLogTail(projectID string, instances []*compute.InstanceInfo) error {
+	filter := vmLogFilter(instances, tailSeverity)
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Filter: %s\n", filter)
+	}
+
+	// Use instance name as prefix label; for single VM use fixed prefix.
+	singleVM := len(instances) == 1
+	prefix := ""
+	if singleVM {
+		prefix = instances[0].Name
+	}
+	f := cloudrun.NewLogFormatter(prefix, singleVM)
+	if !singleVM {
+		f.SetLabelKeys([]string{"instance_name"})
+	}
+
+	ctx := context.Background()
+
+	entries, err := cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
+	if err != nil {
+		return fmt.Errorf("failed to fetch logs: %w", err)
+	}
+	cloudrun.PrintLogs(entries, f)
+
+	if !tailFollow {
+		if len(entries) == 0 {
+			fmt.Fprintln(os.Stderr, "No log entries found.")
+		}
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	go func() {
+		<-sigChan
+		fmt.Fprintln(os.Stderr, "\nInterrupted.")
+		cancel()
+	}()
+
+	return cloudrun.StreamLogs(ctx, projectID, filter, f)
 }
 
 func init() {
