@@ -267,6 +267,29 @@ func DeleteExecution(ctx context.Context, project, region, jobName, executionNam
 	return nil
 }
 
+// CancelExecution cancels a running Cloud Run job execution.
+func CancelExecution(ctx context.Context, project, region, jobName, executionName string) error {
+	client, err := GetExecutionsClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create Cloud Run executions client: %w", err)
+	}
+
+	name := fmt.Sprintf("projects/%s/locations/%s/jobs/%s/executions/%s", project, region, jobName, executionName)
+	apilog.Logf("[CloudRun] Executions.Cancel(%s)", name)
+
+	op, err := client.CancelExecution(ctx, &runpb.CancelExecutionRequest{Name: name})
+	if err != nil {
+		return fmt.Errorf("failed to cancel execution %s: %w", executionName, err)
+	}
+
+	// Wait for the operation to complete.
+	_, err = op.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("failed waiting for cancellation of execution %s: %w", executionName, err)
+	}
+	return nil
+}
+
 // ListWorkerPools lists all Cloud Run worker pools in the given project/region.
 func ListWorkerPools(ctx context.Context, project, region string) ([]*WorkerPoolInfo, error) {
 	client, err := GetWorkerPoolsClient(ctx)

@@ -329,6 +329,102 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 	return nil
 }
 
+// Cancel cancels running Cloud Run job executions.
+// Supports:
+//   - jobs://job-name/execution-name  → cancel a specific execution
+//   - jobs://job-name/*               → cancel all running/pending executions
+func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOptions) error {
+	parsed := parseCloudRunPath(p)
+	if parsed.scheme != "jobs" || parsed.name == "" {
+		return fmt.Errorf("cancel only supports Cloud Run job executions (jobs://job-name/execution-name)")
+	}
+	if parsed.execution == "" {
+		return fmt.Errorf("cancel requires an execution name: jobs://job-name/execution-name or jobs://job-name/*")
+	}
+
+	var project, region string
+	if opts != nil {
+		project = opts.Project
+		region = opts.Region
+	}
+	if project == "" {
+		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
+	}
+	if region == "" {
+		return fmt.Errorf("region is required (use --region flag or set defaults.region in config)")
+	}
+
+	// Single execution cancellation
+	if parsed.execution != "*" && !strings.ContainsAny(parsed.execution, "*?") {
+		if opts == nil || !opts.Force {
+			fmt.Printf("Cancel execution %s? (y/N): ", parsed.execution)
+			var response string
+			fmt.Scanln(&response)
+			if response != "y" && response != "Y" {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+		}
+		if err := cloudrun.CancelExecution(ctx, project, region, parsed.name, parsed.execution); err != nil {
+			return err
+		}
+		fmt.Printf("Cancelled: %s\n", parsed.execution)
+		return nil
+	}
+
+	// Wildcard: list executions and cancel running/pending ones
+	executions, err := cloudrun.ListExecutions(ctx, project, region, parsed.name)
+	if err != nil {
+		return err
+	}
+
+	var toCancel []*cloudrun.ExecutionInfo
+	for _, exec := range executions {
+		if exec.Status != "Running" && exec.Status != "Pending" {
+			continue
+		}
+		if parsed.execution != "*" {
+			if ok, _ := path.Match(parsed.execution, exec.Name); !ok {
+				continue
+			}
+		}
+		toCancel = append(toCancel, exec)
+	}
+
+	if len(toCancel) == 0 {
+		fmt.Println("No running/pending executions found to cancel.")
+		return nil
+	}
+
+	fmt.Printf("Found %d running/pending execution(s) to cancel:\n", len(toCancel))
+	for _, exec := range toCancel {
+		fmt.Printf("  - %s (%s)\n", exec.Name, exec.Status)
+	}
+	fmt.Println()
+
+	if opts == nil || !opts.Force {
+		fmt.Printf("Cancel all %d execution(s)? (y/N): ", len(toCancel))
+		var response string
+		fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	for _, exec := range toCancel {
+		if opts != nil && opts.Verbose {
+			fmt.Printf("Cancelling %s...\n", exec.Name)
+		}
+		if err := cloudrun.CancelExecution(ctx, project, region, parsed.name, exec.Name); err != nil {
+			return err
+		}
+		fmt.Printf("Cancelled: %s\n", exec.Name)
+	}
+
+	return nil
+}
+
 // Info returns detailed information about a Cloud Run resource.
 func (r *CloudRunResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
 	return nil, fmt.Errorf("cio info is not yet supported for Cloud Run resources")
