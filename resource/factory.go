@@ -44,6 +44,10 @@ func (f *Factory) Create(path string) (Resource, error) {
 		return CreateVMResource(f.formatter), nil
 	}
 
+	if resolver.IsPubSubPath(path) {
+		return CreatePubSubResource(f.formatter), nil
+	}
+
 	return nil, fmt.Errorf("unknown resource type for path: %s", path)
 }
 
@@ -62,6 +66,8 @@ func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
 		return CreateDataflowResource(f.formatter), nil
 	case TypeVM:
 		return CreateVMResource(f.formatter), nil
+	case TypePubSub:
+		return CreatePubSubResource(f.formatter), nil
 	default:
 		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
 	}

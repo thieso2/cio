@@ -31,7 +31,7 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 	// If already a full path, return as-is
 	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") ||
 		strings.HasPrefix(aliasPath, "svc://") || strings.HasPrefix(aliasPath, "jobs://") || strings.HasPrefix(aliasPath, "worker://") ||
-		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") {
+		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") || strings.HasPrefix(aliasPath, "pubsub://") {
 		return aliasPath, nil
 	}
 
@@ -81,7 +81,7 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		} else {
 			fullPath = basePath
 		}
-	} else if strings.HasPrefix(basePath, "svc://") || strings.HasPrefix(basePath, "jobs://") || strings.HasPrefix(basePath, "worker://") || strings.HasPrefix(basePath, "dataflow://") || strings.HasPrefix(basePath, "vm://") {
+	} else if strings.HasPrefix(basePath, "svc://") || strings.HasPrefix(basePath, "jobs://") || strings.HasPrefix(basePath, "worker://") || strings.HasPrefix(basePath, "dataflow://") || strings.HasPrefix(basePath, "vm://") || strings.HasPrefix(basePath, "pubsub://") {
 		// Cloud Run / Dataflow / VM path - use slash separator, no normalization
 		if suffix != "" {
 			fullPath = basePath + "/" + suffix
@@ -186,7 +186,7 @@ func IsGCSPath(path string) bool {
 // ReverseResolve converts a full path back to an alias path.
 // Returns the alias path with : prefix if a matching alias exists, otherwise returns the original path.
 func (r *Resolver) ReverseResolve(fullPath string) string {
-	if !IsGCSPath(fullPath) && !IsBQPath(fullPath) && !IsCloudRunPath(fullPath) && !IsDataflowPath(fullPath) && !IsVMPath(fullPath) {
+	if !IsGCSPath(fullPath) && !IsBQPath(fullPath) && !IsCloudRunPath(fullPath) && !IsDataflowPath(fullPath) && !IsVMPath(fullPath) && !IsPubSubPath(fullPath) {
 		return fullPath
 	}
 
@@ -202,7 +202,7 @@ func (r *Resolver) ReverseResolve(fullPath string) string {
 				}
 				return ":" + alias + "." + suffix
 			}
-		} else if IsCloudRunPath(basePath) || IsDataflowPath(basePath) || IsVMPath(basePath) {
+		} else if IsCloudRunPath(basePath) || IsDataflowPath(basePath) || IsVMPath(basePath) || IsPubSubPath(basePath) {
 			// Cloud Run / Dataflow / VM path - match with slash separator
 			if strings.HasPrefix(fullPath, basePath) {
 				suffix := strings.TrimPrefix(fullPath, basePath)
@@ -267,6 +267,11 @@ func IsDataflowPath(path string) bool {
 // IsVMPath checks if a string is a VM (Compute Engine) path
 func IsVMPath(path string) bool {
 	return strings.HasPrefix(path, "vm://")
+}
+
+// IsPubSubPath checks if a string is a Pub/Sub path
+func IsPubSubPath(path string) bool {
+	return strings.HasPrefix(path, "pubsub://")
 }
 
 // GetAliasForInput extracts the alias from user input if one was used

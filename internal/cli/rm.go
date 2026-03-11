@@ -16,8 +16,8 @@ var (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <path>",
-	Short: "Remove objects from GCS, BigQuery, Cloud Run, or Compute Engine",
-	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, Cloud Run job executions, or VM instances.
+	Short: "Remove objects from GCS, BigQuery, Cloud Run, Compute Engine, or Pub/Sub",
+	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, Cloud Run job executions, VM instances, or Pub/Sub topics/subscriptions.
 
 Examples (GCS):
   cio rm :am/2024/data.csv
@@ -52,7 +52,20 @@ Examples (VM):
   # Force remove without confirmation
   cio rm -f vm://europe-west3-a/my-instance
 
-CAUTION: Deleted objects, tables, executions, and VMs cannot be recovered.`,
+Examples (Pub/Sub):
+  # Delete a topic (warns about orphaned subscriptions)
+  cio rm pubsub://topics/my-topic
+
+  # Delete a subscription
+  cio rm pubsub://subs/my-sub
+
+  # Delete subscriptions matching a pattern
+  cio rm 'pubsub://subs/staging-*'
+
+  # Force delete without confirmation
+  cio rm -f pubsub://subs/test-sub
+
+CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot be recovered.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -64,7 +77,7 @@ CAUTION: Deleted objects, tables, executions, and VMs cannot be recovered.`,
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -94,8 +107,8 @@ CAUTION: Deleted objects, tables, executions, and VMs cannot be recovered.`,
 			return err
 		}
 
-		// Cloud Run and VM handle their own listing/confirmation in Remove
-		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) {
+		// Cloud Run, VM, and Pub/Sub handle their own listing/confirmation in Remove
+		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) {
 			options := &resource.RemoveOptions{
 				Force:   rmForce,
 				Verbose: verbose,

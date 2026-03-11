@@ -27,7 +27,7 @@ var (
 
 var lsCmd = &cobra.Command{
 	Use:   "ls <path>",
-	Short: "List GCS buckets/objects, BigQuery datasets/tables, Dataflow jobs, or VMs",
+	Short: "List GCS buckets/objects, BigQuery datasets/tables, Dataflow jobs, VMs, or Pub/Sub resources",
 	Long: `List GCS buckets, objects, BigQuery datasets/tables, or Dataflow jobs using an alias or full path.
 
 The path can be either:
@@ -95,7 +95,24 @@ Examples (VM):
   cio ls 'vm://*/iomp*'
 
   # Long format with status, machine type, IP
-  cio ls -l vm://europe-west3-a`,
+  cio ls -l vm://europe-west3-a
+
+Examples (Pub/Sub):
+  # List all topics and subscriptions
+  cio ls pubsub://
+
+  # List topics only
+  cio ls pubsub://topics
+
+  # List subscriptions only
+  cio ls pubsub://subs
+
+  # Long format with metrics
+  cio ls -l pubsub://subs
+
+  # Wildcard patterns
+  cio ls 'pubsub://topics/events-*'
+  cio ls 'pubsub://subs/staging-*'`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -107,7 +124,7 @@ Examples (VM):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -180,6 +197,12 @@ Examples (VM):
 			return nil
 		}
 
+		// Pub/Sub "both" mode: print topics and subs in separate sections
+		if resolver.IsPubSubPath(fullPath) && hasMixedTypes(resources) {
+			printPubSubSections(resources, res, r, shouldReverseMap, lsLongFormat)
+			return nil
+		}
+
 		// Print header for long format if resource type provides one
 		if lsLongFormat {
 			var header string
@@ -209,6 +232,69 @@ Examples (VM):
 
 		return nil
 	},
+}
+
+// hasMixedTypes returns true if resources contain both topics and subscriptions.
+func hasMixedTypes(resources []*resource.ResourceInfo) bool {
+	hasTopic := false
+	hasSub := false
+	for _, r := range resources {
+		if r.Type == "topic" {
+			hasTopic = true
+		} else if r.Type == "subscription" {
+			hasSub = true
+		}
+		if hasTopic && hasSub {
+			return true
+		}
+	}
+	return false
+}
+
+// printPubSubSections prints topics and subscriptions in separate sections.
+func printPubSubSections(resources []*resource.ResourceInfo, res resource.Resource, r *resolver.Resolver, shouldReverseMap, longFormat bool) {
+	var topics, subs []*resource.ResourceInfo
+	for _, info := range resources {
+		if info.Type == "topic" {
+			topics = append(topics, info)
+		} else {
+			subs = append(subs, info)
+		}
+	}
+
+	if len(topics) > 0 {
+		fmt.Printf("Topics (%d):\n", len(topics))
+		for _, info := range topics {
+			displayPath := info.Path
+			if shouldReverseMap {
+				displayPath = r.ReverseResolve(info.Path)
+			}
+			if longFormat {
+				fmt.Println("  " + res.FormatLong(info, displayPath))
+			} else {
+				fmt.Println("  " + res.FormatShort(info, displayPath))
+			}
+		}
+	}
+
+	if len(topics) > 0 && len(subs) > 0 {
+		fmt.Println()
+	}
+
+	if len(subs) > 0 {
+		fmt.Printf("Subscriptions (%d):\n", len(subs))
+		for _, info := range subs {
+			displayPath := info.Path
+			if shouldReverseMap {
+				displayPath = r.ReverseResolve(info.Path)
+			}
+			if longFormat {
+				fmt.Println("  " + res.FormatLong(info, displayPath))
+			} else {
+				fmt.Println("  " + res.FormatShort(info, displayPath))
+			}
+		}
+	}
 }
 
 // extractRawPath removes the protocol prefix from a path

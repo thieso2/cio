@@ -15,6 +15,7 @@ import (
 	"github.com/thieso2/cio/cloudrun"
 	"github.com/thieso2/cio/compute"
 	"github.com/thieso2/cio/dataflow"
+	"github.com/thieso2/cio/pubsub"
 	"github.com/thieso2/cio/resolver"
 	"github.com/thieso2/cio/resource"
 )
@@ -29,8 +30,8 @@ var (
 
 var tailCmd = &cobra.Command{
 	Use:   "tail [-f] [-n N] <path>",
-	Short: "Show or stream Cloud Run / Dataflow / VM logs",
-	Long: `Show recent logs or stream live logs for Cloud Run services, jobs, workers, Dataflow jobs, or VM instances.
+	Short: "Show or stream Cloud Run / Dataflow / VM logs or Pub/Sub metrics",
+	Long: `Show recent logs or stream live logs for Cloud Run services, jobs, workers, Dataflow jobs, VM instances, or Pub/Sub subscription metrics.
 
 Paths:
   svc://service-name              Cloud Run service logs
@@ -41,6 +42,7 @@ Paths:
   vm://zone/instance-name         VM Cloud Logging output
   vm://zone/instance-name/serial  VM serial port output
   vm://*/pattern*                 VM logs across all zones (wildcard)
+  pubsub://subs/sub-name          Pub/Sub subscription metrics
 
 Dataflow log types (--log-type):
   all      All log types with [J]/[W]/[S] prefix (default)
@@ -68,7 +70,13 @@ Examples:
   cio tail -f 'vm://*/ingress*'
 
   # Stream VM serial port output
-  cio tail -f vm://europe-west3-a/my-instance/serial`,
+  cio tail -f vm://europe-west3-a/my-instance/serial
+
+  # Show Pub/Sub subscription metrics (single snapshot)
+  cio tail pubsub://subs/my-sub
+
+  # Stream Pub/Sub subscription metrics (every 30s)
+  cio tail -f pubsub://subs/my-sub`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTail,
 }
@@ -93,11 +101,16 @@ func runTail(cmd *cobra.Command, args []string) error {
 	// Resolve alias if needed
 	r := resolver.Create(cfg)
 	var err error
-	if !resolver.IsCloudRunPath(inputPath) && !resolver.IsDataflowPath(inputPath) && !resolver.IsVMPath(inputPath) {
+	if !resolver.IsCloudRunPath(inputPath) && !resolver.IsDataflowPath(inputPath) && !resolver.IsVMPath(inputPath) && !resolver.IsPubSubPath(inputPath) {
 		inputPath, err = r.Resolve(inputPath)
 		if err != nil {
 			return err
 		}
+	}
+
+	// Dispatch to Pub/Sub handler if applicable.
+	if resolver.IsPubSubPath(inputPath) {
+		return runPubSubTail(inputPath)
 	}
 
 	// Dispatch to Dataflow handler if applicable.
@@ -112,7 +125,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	crPath := inputPath
 	if !resolver.IsCloudRunPath(crPath) {
-		return fmt.Errorf("tail only supports Cloud Run (svc://, jobs://, worker://), Dataflow (dataflow://), and VM (vm://) paths, got: %s", crPath)
+		return fmt.Errorf("tail only supports Cloud Run (svc://, jobs://, worker://), Dataflow (dataflow://), VM (vm://), and Pub/Sub (pubsub://) paths, got: %s", crPath)
 	}
 
 	projectID := cfg.Defaults.ProjectID
@@ -253,6 +266,40 @@ func parseTailPath(path string) (scheme, name, execution string) {
 		}
 	}
 	return
+}
+
+// runPubSubTail handles tail/show for Pub/Sub subscription metrics.
+func runPubSubTail(psPath string) error {
+	projectID := cfg.Defaults.ProjectID
+	if projectID == "" {
+		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
+	}
+
+	resType, name := pubsub.ParsePubSubPath(psPath)
+	if resType != "subs" || name == "" {
+		return fmt.Errorf("tail only supports pubsub://subs/SUBSCRIPTION-NAME")
+	}
+
+	ctx := context.Background()
+
+	if tailFollow {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigChan)
+		go func() {
+			<-sigChan
+			fmt.Fprintln(os.Stderr, "\nInterrupted.")
+			cancel()
+		}()
+
+		fmt.Fprintf(os.Stderr, "Streaming metrics for %s... (Ctrl+C to stop)\n", name)
+		return pubsub.StreamMetrics(ctx, projectID, name, true, 30*time.Second)
+	}
+
+	return pubsub.StreamMetrics(ctx, projectID, name, false, 0)
 }
 
 // runDataflowTail handles tail/show for Dataflow paths.

@@ -11,12 +11,13 @@ import (
 	"cloud.google.com/go/bigquery"
 	"github.com/thieso2/cio/apilog"
 	"google.golang.org/api/iterator"
+	bqapi "google.golang.org/api/bigquery/v2"
 )
 
 // BQObjectInfo holds information about a BigQuery object (dataset or table)
 type BQObjectInfo struct {
 	Path        string
-	Type        string // "dataset" or "table"
+	Type        string // "dataset", "table", "view", "materialized_view", "external", "snapshot"
 	Created     time.Time
 	Modified    time.Time
 	Description string
@@ -24,6 +25,19 @@ type BQObjectInfo struct {
 	SizeBytes   int64
 	Schema      bigquery.Schema // Table schema (only for tables)
 	NumRows     int64           // Number of rows (only for tables)
+	ViewQuery   string          // SQL query (only for views)
+
+	// Storage info (from INFORMATION_SCHEMA.TABLE_STORAGE)
+	NumPartitions              int64
+	TotalLogicalBytes          int64
+	ActiveLogicalBytes         int64
+	LongTermLogicalBytes       int64
+	CurrentPhysicalBytes       int64
+	TotalPhysicalBytes         int64
+	ActivePhysicalBytes        int64
+	LongTermPhysicalBytes      int64
+	TimeTravelPhysicalBytes    int64
+	HasStorageInfo             bool // true if storage stats were fetched
 }
 
 // FormatShort formats BigQuery object info in short format
@@ -41,57 +55,82 @@ func (bi *BQObjectInfo) FormatLong() string {
 	created := formatUnixTime(bi.Created)
 
 	var size string
-	if bi.Type == "table" && bi.SizeBytes > 0 {
+	if bi.Type != "dataset" && bi.SizeBytes > 0 {
 		size = formatSize(bi.SizeBytes)
 	} else {
 		size = "-"
 	}
 
-	return fmt.Sprintf("%s  %-8s  %-15s  %s", created, bi.Type, size, bi.Path)
+	return fmt.Sprintf("%s  %-18s  %-15s  %s", created, bi.Type, size, bi.Path)
 }
 
 // FormatLongWithAlias formats BigQuery object info in long format using alias path
 func (bi *BQObjectInfo) FormatLongWithAlias(aliasPath string) string {
 	var size string
-	if bi.Type == "table" && bi.SizeBytes > 0 {
+	if bi.Type != "dataset" && bi.SizeBytes > 0 {
 		size = formatSize(bi.SizeBytes)
 	} else {
 		size = "-"
 	}
 
 	var rows string
-	if bi.Type == "table" && bi.NumRows > 0 {
+	if bi.Type != "dataset" && bi.NumRows > 0 {
 		rows = formatNumber(bi.NumRows)
 	} else {
 		rows = "-"
 	}
 
-	return fmt.Sprintf("%-8s  %15s  %20s  %s", bi.Type, size, rows, aliasPath)
+	return fmt.Sprintf("%-18s  %15s  %20s  %s", bi.Type, size, rows, aliasPath)
 }
 
 // FormatLongHeader returns the header for long format listing
 func FormatLongHeader() string {
-	return fmt.Sprintf("%-8s  %15s  %20s  %s", "TYPE", "SIZE", "ROWS", "PATH")
+	return fmt.Sprintf("%-18s  %15s  %20s  %s", "TYPE", "SIZE", "ROWS", "PATH")
 }
 
 // FormatDetailed formats BigQuery table info with schema details
 func (bi *BQObjectInfo) FormatDetailed(aliasPath string) string {
 	var output strings.Builder
 
-	// Header information
-	output.WriteString(fmt.Sprintf("Table: %s\n", aliasPath))
+	// Header - use type-specific label
+	label := strings.ToUpper(bi.Type[:1]) + bi.Type[1:]
+	fmt.Fprintf(&output, "%s: %s\n", label, aliasPath)
 	if bi.Description != "" {
-		output.WriteString(fmt.Sprintf("Description: %s\n", bi.Description))
+		fmt.Fprintf(&output, "Description: %s\n", bi.Description)
 	}
-	output.WriteString(fmt.Sprintf("Created: %s\n", formatUnixTime(bi.Created)))
-	output.WriteString(fmt.Sprintf("Modified: %s\n", formatUnixTime(bi.Modified)))
-	output.WriteString(fmt.Sprintf("Location: %s\n", bi.Location))
+	fmt.Fprintf(&output, "Created: %s\n", formatUnixTime(bi.Created))
+	fmt.Fprintf(&output, "Modified: %s\n", formatUnixTime(bi.Modified))
+	fmt.Fprintf(&output, "Location: %s\n", bi.Location)
 
-	if bi.SizeBytes > 0 {
-		output.WriteString(fmt.Sprintf("Size: %s\n", formatSize(bi.SizeBytes)))
+	// For views: show the SQL query
+	if bi.ViewQuery != "" {
+		fmt.Fprintf(&output, "\nView SQL:\n%s\n", bi.ViewQuery)
 	}
-	if bi.NumRows > 0 {
-		output.WriteString(fmt.Sprintf("Rows: %s\n", formatNumber(bi.NumRows)))
+
+	// For tables: show storage info
+	if bi.Type == "table" || bi.Type == "materialized_view" {
+		if bi.HasStorageInfo {
+			output.WriteString("\nStorage info:\n")
+			fmt.Fprintf(&output, "  %-30s %s\n", "Number of rows", formatNumber(bi.NumRows))
+			if bi.NumPartitions > 0 {
+				fmt.Fprintf(&output, "  %-30s %s\n", "Number of partitions", formatNumber(bi.NumPartitions))
+			}
+			fmt.Fprintf(&output, "  %-30s %s\n", "Total logical bytes", formatSize(bi.TotalLogicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Active logical bytes", formatSize(bi.ActiveLogicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Long term logical bytes", formatSize(bi.LongTermLogicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Current physical bytes", formatSize(bi.CurrentPhysicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Total physical bytes", formatSize(bi.TotalPhysicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Active physical bytes", formatSize(bi.ActivePhysicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Long term physical bytes", formatSize(bi.LongTermPhysicalBytes))
+			fmt.Fprintf(&output, "  %-30s %s\n", "Time travel physical bytes", formatSize(bi.TimeTravelPhysicalBytes))
+		} else {
+			if bi.SizeBytes > 0 {
+				fmt.Fprintf(&output, "Size: %s\n", formatSize(bi.SizeBytes))
+			}
+			if bi.NumRows > 0 {
+				fmt.Fprintf(&output, "Rows: %s\n", formatNumber(bi.NumRows))
+			}
+		}
 	}
 
 	// Schema information
@@ -103,6 +142,93 @@ func (bi *BQObjectInfo) FormatDetailed(aliasPath string) string {
 	}
 
 	return output.String()
+}
+
+// SchemaFieldJSON is a JSON-serializable representation of a BigQuery schema field.
+type SchemaFieldJSON struct {
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Description string            `json:"description,omitempty"`
+	Repeated    bool              `json:"repeated,omitempty"`
+	Fields      []SchemaFieldJSON `json:"fields,omitempty"`
+}
+
+// InfoJSON is a JSON-serializable representation of BQObjectInfo.
+type InfoJSON struct {
+	Path        string `json:"path"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Created     string `json:"created"`
+	Modified    string `json:"modified"`
+	Location    string `json:"location"`
+
+	// View-specific
+	ViewQuery string `json:"view_query,omitempty"`
+
+	// Storage info (tables only)
+	NumRows                 int64 `json:"num_rows,omitempty"`
+	NumPartitions           int64 `json:"num_partitions,omitempty"`
+	TotalLogicalBytes       int64 `json:"total_logical_bytes,omitempty"`
+	ActiveLogicalBytes      int64 `json:"active_logical_bytes,omitempty"`
+	LongTermLogicalBytes    int64 `json:"long_term_logical_bytes,omitempty"`
+	CurrentPhysicalBytes    int64 `json:"current_physical_bytes,omitempty"`
+	TotalPhysicalBytes      int64 `json:"total_physical_bytes,omitempty"`
+	ActivePhysicalBytes     int64 `json:"active_physical_bytes,omitempty"`
+	LongTermPhysicalBytes   int64 `json:"long_term_physical_bytes,omitempty"`
+	TimeTravelPhysicalBytes int64 `json:"time_travel_physical_bytes,omitempty"`
+
+	Schema []SchemaFieldJSON `json:"schema,omitempty"`
+}
+
+// ToJSON converts BQObjectInfo to a JSON-serializable struct.
+func (bi *BQObjectInfo) ToJSON(aliasPath string) *InfoJSON {
+	j := &InfoJSON{
+		Path:        aliasPath,
+		Type:        bi.Type,
+		Description: bi.Description,
+		Created:     bi.Created.Format(time.RFC3339),
+		Modified:    bi.Modified.Format(time.RFC3339),
+		Location:    bi.Location,
+		ViewQuery:   bi.ViewQuery,
+	}
+
+	if bi.HasStorageInfo {
+		j.NumRows = bi.NumRows
+		j.NumPartitions = bi.NumPartitions
+		j.TotalLogicalBytes = bi.TotalLogicalBytes
+		j.ActiveLogicalBytes = bi.ActiveLogicalBytes
+		j.LongTermLogicalBytes = bi.LongTermLogicalBytes
+		j.CurrentPhysicalBytes = bi.CurrentPhysicalBytes
+		j.TotalPhysicalBytes = bi.TotalPhysicalBytes
+		j.ActivePhysicalBytes = bi.ActivePhysicalBytes
+		j.LongTermPhysicalBytes = bi.LongTermPhysicalBytes
+		j.TimeTravelPhysicalBytes = bi.TimeTravelPhysicalBytes
+	} else if bi.Type == "table" || bi.Type == "materialized_view" {
+		j.NumRows = bi.NumRows
+		j.TotalLogicalBytes = bi.SizeBytes
+	}
+
+	if len(bi.Schema) > 0 {
+		j.Schema = convertSchema(bi.Schema)
+	}
+
+	return j
+}
+
+func convertSchema(fields bigquery.Schema) []SchemaFieldJSON {
+	result := make([]SchemaFieldJSON, len(fields))
+	for i, f := range fields {
+		result[i] = SchemaFieldJSON{
+			Name:        f.Name,
+			Type:        string(f.Type),
+			Description: f.Description,
+			Repeated:    f.Repeated,
+		}
+		if len(f.Schema) > 0 {
+			result[i].Fields = convertSchema(f.Schema)
+		}
+	}
+	return result
 }
 
 // formatSchemaField formats a schema field with proper indentation for nested fields
@@ -285,7 +411,7 @@ func ListTables(ctx context.Context, projectID, datasetID string) ([]*BQObjectIn
 				results <- result{
 					info: &BQObjectInfo{
 						Path:        fmt.Sprintf("bq://%s.%s.%s", projectID, datasetID, h.table.TableID),
-						Type:        "table",
+						Type:        bqTableType(meta.Type),
 						Created:     meta.CreationTime,
 						Modified:    meta.LastModifiedTime,
 						Description: meta.Description,
@@ -337,7 +463,7 @@ func DescribeTable(ctx context.Context, projectID, datasetID, tableID string) (*
 
 	return &BQObjectInfo{
 		Path:        fmt.Sprintf("bq://%s.%s.%s", projectID, datasetID, tableID),
-		Type:        "table",
+		Type:        bqTableType(meta.Type),
 		Created:     meta.CreationTime,
 		Modified:    meta.LastModifiedTime,
 		Description: meta.Description,
@@ -345,7 +471,54 @@ func DescribeTable(ctx context.Context, projectID, datasetID, tableID string) (*
 		SizeBytes:   meta.NumBytes,
 		Schema:      meta.Schema,
 		NumRows:     int64(meta.NumRows),
+		ViewQuery:   meta.ViewQuery,
 	}, nil
+}
+
+// FetchStorageInfo uses the BigQuery REST API to get detailed storage stats
+// (physical bytes, partitions, etc.) and populates the storage fields on BQObjectInfo.
+func FetchStorageInfo(ctx context.Context, projectID, datasetID, tableID string, info *BQObjectInfo) error {
+	apilog.Logf("[BQ] REST Tables.Get(project=%s, dataset=%s, table=%s)", projectID, datasetID, tableID)
+
+	svc, err := bqapi.NewService(ctx)
+	if err != nil {
+		return err
+	}
+
+	table, err := svc.Tables.Get(projectID, datasetID, tableID).Context(ctx).Do()
+	if err != nil {
+		return err
+	}
+
+	info.NumRows = int64(table.NumRows)
+	info.NumPartitions = table.NumPartitions
+	info.TotalLogicalBytes = table.NumTotalLogicalBytes
+	info.ActiveLogicalBytes = table.NumActiveLogicalBytes
+	info.LongTermLogicalBytes = table.NumLongTermLogicalBytes
+	info.CurrentPhysicalBytes = table.NumCurrentPhysicalBytes
+	info.TotalPhysicalBytes = table.NumTotalPhysicalBytes
+	info.ActivePhysicalBytes = table.NumActivePhysicalBytes
+	info.LongTermPhysicalBytes = table.NumLongTermPhysicalBytes
+	info.TimeTravelPhysicalBytes = table.NumTimeTravelPhysicalBytes
+	info.HasStorageInfo = true
+
+	return nil
+}
+
+// bqTableType converts a BigQuery TableType to a lowercase display string.
+func bqTableType(t bigquery.TableType) string {
+	switch t {
+	case bigquery.ViewTable:
+		return "view"
+	case bigquery.MaterializedView:
+		return "materialized_view"
+	case bigquery.ExternalTable:
+		return "external"
+	case bigquery.Snapshot:
+		return "snapshot"
+	default:
+		return "table"
+	}
 }
 
 // ParseBQPath parses a bq:// path into components

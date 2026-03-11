@@ -163,6 +163,14 @@ func (b *BigQueryResource) Info(ctx context.Context, path string) (*ResourceInfo
 		return nil, err
 	}
 
+	// For tables (not views), fetch detailed storage info
+	if obj.Type == "table" || obj.Type == "materialized_view" {
+		if storageErr := bigquery.FetchStorageInfo(ctx, projectID, datasetID, tableID, obj); storageErr != nil {
+			// Non-fatal: fall back to basic metadata
+			_ = storageErr
+		}
+	}
+
 	return &ResourceInfo{
 		Path:        obj.Path,
 		Type:        obj.Type,
