@@ -1,0 +1,153 @@
+/* Custom Styles for CIO Browser */
+
+/* Dark mode transitions */
+html {
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* List view mode */
+.view-list #resource-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.view-list .resource-card {
+    display: flex;
+    width: 100%;
+}
+
+/* Grid view mode (default) */
+.view-grid #resource-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+/* HTMX loading indicator */
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator {
+    display: inline-block;
+}
+
+.htmx-request.htmx-indicator {
+    display: inline-block;
+}
+
+/* Smooth hover transitions */
+.resource-card,
+.alias-btn,
+button {
+    transition: all 0.2s ease;
+}
+
+/* Active alias highlight */
+.alias-btn.active {
+    background-color: rgba(59, 130, 246, 0.1);
+    border-left: 3px solid rgb(59, 130, 246);
+}
+
+/* Loading spinner */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e0;
+    border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: #4a5568;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a0aec0;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: #718096;
+}
+
+/* Code block styling for file preview */
+pre {
+    background-color: #f7fafc;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+}
+
+.dark pre {
+    background-color: #2d3748;
+}
+
+/* Modal backdrop animation */
+#preview-modal {
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Toast notifications (for future use) */
+.toast {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+    }
+    to {
+        transform: translateX(0);
+    }
+}
+
+.toast-success {
+    background-color: #48bb78;
+    color: white;
+}
+
+.toast-error {
+    background-color: #f56565;
+    color: white;
+}
+
+.toast-info {
+    background-color: #4299e1;
+    color: white;
+}
