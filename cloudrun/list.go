@@ -363,7 +363,7 @@ func (s *ServiceInfo) FormatServiceLong() string {
 	if uri == "" {
 		uri = "-"
 	}
-	return fmt.Sprintf("%-40s %-12s %-20s %s", s.Name, s.Status, updated, uri)
+	return fmt.Sprintf("%-55s %-12s %-20s %s", s.Name, s.Status, updated, uri)
 }
 
 // FormatShort formats a job in short format.
@@ -372,7 +372,7 @@ func (j *JobInfo) FormatShort() string { return j.Name }
 // FormatJobLong formats a job in long format.
 func (j *JobInfo) FormatJobLong() string {
 	updated := j.Updated.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-40s %-12s %7d %7d  %s", j.Name, j.Status, j.ActiveExecs, j.ExecutionCount, updated)
+	return fmt.Sprintf("%-55s %-12s %7d %7d  %s", j.Name, j.Status, j.ActiveExecs, j.ExecutionCount, updated)
 }
 
 // FormatShort formats an execution in short format.
@@ -398,17 +398,17 @@ func (w *WorkerPoolInfo) FormatShort() string { return w.Name }
 // FormatWorkerPoolLong formats a worker pool in long format.
 func (w *WorkerPoolInfo) FormatWorkerPoolLong() string {
 	updated := w.Updated.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-40s %-12s %10d  %s", w.Name, w.Status, w.InstanceCount, updated)
+	return fmt.Sprintf("%-55s %-12s %10d  %s", w.Name, w.Status, w.InstanceCount, updated)
 }
 
 // ServiceLongHeader returns the header for long service listing.
 func ServiceLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %-20s %s", "NAME", "STATUS", "UPDATED", "URL")
+	return fmt.Sprintf("%-55s %-12s %-20s %s", "NAME", "STATUS", "UPDATED", "URL")
 }
 
 // JobLongHeader returns the header for long job listing.
 func JobLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %7s %7s  %s", "NAME", "STATUS", "ACTIVE", "TOTAL", "UPDATED")
+	return fmt.Sprintf("%-55s %-12s %7s %7s  %s", "NAME", "STATUS", "ACTIVE", "TOTAL", "UPDATED")
 }
 
 // ExecutionLongHeader returns the header for long execution listing.
@@ -418,7 +418,7 @@ func ExecutionLongHeader() string {
 
 // WorkerPoolLongHeader returns the header for long worker pool listing.
 func WorkerPoolLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %10s  %s", "NAME", "STATUS", "INSTANCES", "UPDATED")
+	return fmt.Sprintf("%-55s %-12s %10s  %s", "NAME", "STATUS", "INSTANCES", "UPDATED")
 }
 
 // UpdateWorkerPoolInstances updates the manual instance count for a worker pool.

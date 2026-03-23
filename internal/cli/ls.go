@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -117,6 +118,11 @@ Examples (Pub/Sub):
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
+		// Check for discover mode: scheme://[project-pattern]/rest
+		if projectPattern, scheme, rest, ok := parseDiscoverPath(path); ok {
+			return runDiscoverMode(cmd, scheme, projectPattern, rest)
+		}
+
 		// Resolve alias to full path if needed
 		r := resolver.Create(cfg)
 		var fullPath string
@@ -124,7 +130,7 @@ Examples (Pub/Sub):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) || resolver.IsCloudSQLPath(path) || resolver.IsLoadBalancerPath(path) || resolver.IsCertManagerPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -336,6 +342,195 @@ func sortResources(resources []*resource.ResourceInfo, bySize, byTime bool) {
 			return resources[i].Path < resources[j].Path
 		})
 	}
+}
+
+// prefixResourceName prefixes the name in both ResourceInfo and its metadata with projectID:.
+func prefixResourceName(info *resource.ResourceInfo, projectID string) {
+	prefix := projectID + ":"
+	info.Name = prefix + info.Name
+	// Update metadata Name/Email fields so FormatLong uses the prefixed name
+	if info.Metadata != nil {
+		prefixMetadataName(info.Metadata, prefix)
+	}
+}
+
+// prefixMetadataName uses reflection to prefix the Name (or Email) field on any metadata struct.
+func prefixMetadataName(metadata interface{}, prefix string) {
+	v := reflect.ValueOf(metadata)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	// Try Name field first, then Email (for IAM)
+	for _, fieldName := range []string{"Name", "Email"} {
+		f := v.FieldByName(fieldName)
+		if f.IsValid() && f.Kind() == reflect.String && f.CanSet() {
+			f.SetString(prefix + f.String())
+			return
+		}
+	}
+}
+
+// parseDiscoverPath checks if path uses discover syntax: scheme:/project-pattern/rest
+// Single slash after scheme = discover mode (multi-project).
+// Double slash (scheme://) = current project (normal mode).
+//
+// Examples:
+//
+//	jobs:/iom-*/sqlmesh*  → discover across projects matching iom-*
+//	jobs://sqlmesh*       → current project only
+//
+// Returns projectPattern, scheme, rest, ok
+func parseDiscoverPath(path string) (string, string, string, bool) {
+	// Find scheme:/ but NOT scheme://
+	idx := strings.Index(path, ":/")
+	if idx < 0 {
+		return "", "", "", false
+	}
+	// If followed by another /, it's scheme:// (normal mode)
+	if idx+2 < len(path) && path[idx+2] == '/' {
+		return "", "", "", false
+	}
+
+	scheme := path[:idx]
+	after := path[idx+2:] // everything after :/
+
+	// Split into project pattern and rest
+	slashIdx := strings.Index(after, "/")
+	var projectPattern, rest string
+	if slashIdx >= 0 {
+		projectPattern = after[:slashIdx]
+		rest = after[slashIdx+1:]
+	} else {
+		projectPattern = after
+		rest = ""
+	}
+
+	if projectPattern == "" {
+		return "", "", "", false
+	}
+
+	return projectPattern, scheme, rest, true
+}
+
+// runDiscoverMode lists resources across multiple projects matching a pattern.
+func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) error {
+	ctx := context.Background()
+
+	// List matching projects
+	projectIDs, err := resource.ListProjectIDs(ctx, projectPattern)
+	if err != nil {
+		return err
+	}
+	if len(projectIDs) == 0 {
+		fmt.Fprintf(os.Stderr, "No projects matching [%s]\n", projectPattern)
+		return nil
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Discover: %d projects matching [%s]\n", len(projectIDs), projectPattern)
+	}
+
+	r := resolver.Create(cfg)
+	factory := resource.CreateFactory(r.ReverseResolve)
+
+	headerPrinted := false
+
+	for _, projectID := range projectIDs {
+		// Build the resource path, embedding project ID where the scheme requires it
+		var resourcePath string
+		switch scheme {
+		case "bq":
+			// bq://project-id or bq://project-id.dataset
+			resourcePath = "bq://" + projectID
+			if rest != "" {
+				resourcePath += "." + rest
+			}
+		case "iam":
+			// iam://project-id/resource-type
+			resourcePath = "iam://" + projectID
+			if rest != "" {
+				resourcePath += "/" + rest
+			}
+		default:
+			// Cloud Run, Dataflow, VM, PubSub use opts.ProjectID
+			resourcePath = scheme + "://"
+			if rest != "" {
+				resourcePath += rest
+			}
+		}
+
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Listing %s in project %s\n", resourcePath, projectID)
+		}
+
+		res, err := factory.Create(resourcePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
+			continue
+		}
+
+		options := &resource.ListOptions{
+			Recursive:     lsRecursive,
+			LongFormat:    lsLongFormat,
+			HumanReadable: lsHumanReadable,
+			MaxResults:    lsMaxResults,
+			ProjectID:     projectID,
+			Region:        cfg.Defaults.Region,
+			ActiveOnly:    lsActiveOnly,
+			AllStatuses:   lsAll,
+		}
+
+		resources, err := res.List(ctx, resourcePath, options)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
+			}
+			continue
+		}
+
+		if len(resources) == 0 {
+			continue
+		}
+
+		// Sort
+		sortByTime := lsSortByTime
+		if !lsSortBySize && !lsSortByTime {
+			if resolver.IsCloudRunPath(resourcePath) || resolver.IsDataflowPath(resourcePath) {
+				sortByTime = true
+			}
+		}
+		sortResources(resources, lsSortBySize, sortByTime)
+
+		// Print header once
+		if lsLongFormat && !headerPrinted {
+			var header string
+			if resolver.IsCloudRunPath(resourcePath) || resolver.IsDataflowPath(resourcePath) {
+				header = resource.FormatLongHeaderDynamic(resources)
+			} else {
+				header = res.FormatLongHeader()
+			}
+			if header != "" {
+				fmt.Println(header)
+			}
+			headerPrinted = true
+		}
+
+		// Print results with project prefix
+		for _, info := range resources {
+			prefixResourceName(info, projectID)
+
+			if lsLongFormat {
+				fmt.Println(res.FormatLong(info, info.Path))
+			} else {
+				fmt.Println(res.FormatShort(info, info.Path))
+			}
+		}
+	}
+
+	return nil
 }
 
 func init() {

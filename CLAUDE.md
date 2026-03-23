@@ -8,7 +8,7 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
 
 ## Project Overview
 
-`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, and Compute Engine that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
+`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, Compute Engine, Cloud SQL, Load Balancers, and Certificate Manager that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
 
 **Alias Syntax:**
 - Aliases are prefixed with `:` to distinguish them from regular paths
@@ -21,18 +21,27 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
   - BigQuery: `:mydata` → `bq://project-id.dataset`
   - IAM: Direct paths like `iam://project-id/service-accounts`
   - Cloud Run: `svc://`, `jobs://`, `worker://`
+  - Cloud SQL: `sql://`
+  - Load Balancers: `lb://`
+  - Certificate Manager: `certs://`
+  - Projects: `projects://`
   - Dataflow: `dataflow://`
   - VM: `vm://zone/instance-name`
-- Familiar Unix-like commands (`ls`, `cp`, `rm`, `stop`, `tail` with various flags)
-- Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS and VM commands
+- Familiar Unix-like commands (`ls`, `cp`, `rm`, `stop`, `start`, `tail`, `scale`, `cancel` with various flags)
+- Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS, VM, and all resource types
+- **Discover mode**: query resources across multiple projects with single-slash syntax (`scheme:/project-pattern/rest`)
 - BigQuery listing: datasets, tables, and table schemas
 - BigQuery interactive SQL shell with proper horizontal scrolling (peterh/liner)
 - IAM listing: service accounts with metadata
 - Compute Engine: list zones/instances, stop/delete VMs (parallel), tail logs and serial port
 - Cloud Run & Dataflow: list resources, tail/stream logs, manage executions
+- Cloud SQL: list/info instances, start/stop/delete, list databases
+- Load Balancers: list URL maps, forwarding rules, backend services
+- Certificate Manager: list certificates, certificate maps, map entries
+- Projects: list accessible GCP projects with filtering
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
-- Singleton client pattern for performance (GCS, BigQuery, IAM, Cloud Run, Dataflow, Compute)
+- Singleton client pattern for performance (GCS, BigQuery, IAM, Cloud Run, Dataflow, Compute, Cloud SQL, LB, CertManager)
 - Bidirectional file transfer (local ↔ GCS) with parallel chunked downloads
 - FUSE filesystem support for GCS, BigQuery, and IAM (experimental)
 
@@ -311,11 +320,15 @@ graph TB
   - Example: `cio scale worker://pool-name 3`
   - Scale to zero: `cio scale worker://pool-name 0`
   - Uses `UpdateWorkerPool` API with `scaling.manual_instance_count`
-- **stop.go**: Stop VM instances (`cio stop`)
+- **start.go**: Start stopped Cloud SQL instances (`cio start`)
+  - Start single or multiple instances: `cio start 'sql://staging-*'`
+  - Parallel start with confirmation
+- **stop.go**: Stop VM or Cloud SQL instances (`cio stop`)
+  - VM: `cio stop 'vm://*/bastion-*'`
+  - Cloud SQL: `cio stop sql://my-instance`
   - Stops running instances in parallel, skips already-stopped ones
-  - Wildcard support: `cio stop 'vm://*/bastion-*'`
+  - Discover mode: `cio stop 'vm:/iom-*/*/bast*'`
   - Force flag (`-f`) to skip confirmation
-  - Shows instance list with status before confirmation
 - **tail.go**: Show/stream logs for Cloud Run, Dataflow, and VM
   - Cloud Run: `cio tail svc://service`, `cio tail -f jobs://job-name`
   - Dataflow: `cio tail dataflow://job-id`, `--log-type` filter
@@ -734,6 +747,94 @@ cio tail -f svc://my-service
 
 # Tail Cloud Run job logs
 cio tail -f jobs://my-job
+```
+
+### Cloud SQL Examples
+```bash
+# List all instances
+cio ls -l sql://
+
+# List with wildcard
+cio ls -l 'sql://staging-*'
+
+# Detailed instance info
+cio info sql://my-instance
+
+# List databases
+cio ls sql://my-instance/databases
+
+# Stop/start instances
+cio stop sql://my-instance
+cio start sql://my-instance
+
+# Delete instance
+cio rm sql://my-instance
+```
+
+### Load Balancer Examples
+```bash
+# List URL maps (load balancers)
+cio ls -l lb://
+
+# List forwarding rules (frontend IPs)
+cio ls -l lb://forwarding-rules
+
+# List backend services
+cio ls -l lb://backends
+
+# Wildcard
+cio ls 'lb://backends/staging-*'
+```
+
+### Certificate Manager Examples
+```bash
+# List certificates
+cio ls -l certs://
+
+# List certificate maps
+cio ls -l certs://maps
+
+# List entries in a certificate map
+cio ls -l certs://maps/my-cert-map/entries
+
+# Wildcard
+cio ls 'certs://prod-*'
+```
+
+### Projects Examples
+```bash
+# List all accessible projects
+cio ls projects://
+
+# List with details
+cio ls -l projects://
+
+# Filter by pattern
+cio ls -l 'projects://iom-*'
+```
+
+### Discover Mode (Multi-Project)
+```bash
+# Single slash = discover mode (query across matching projects)
+# Double slash = current project only
+
+# List services across all iom-* projects
+cio ls -l 'svc:/iom-*/'
+
+# List Cloud SQL instances across projects
+cio ls -l 'sql:/iom-*/'
+
+# List VMs matching a pattern across projects
+cio ls -l 'vm:/iom-*/*/bast*'
+
+# List load balancers across projects
+cio ls -l 'lb:/iom-*/'
+
+# Delete VMs across projects (with confirmation)
+cio rm 'vm:/iom-*/*/staging-*'
+
+# Stop VMs across projects
+cio stop 'vm:/iom-*/*/bast*'
 ```
 
 ## Future Features (Phase 7+)

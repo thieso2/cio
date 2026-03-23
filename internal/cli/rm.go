@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/thieso2/cio/resolver"
@@ -70,6 +71,11 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
+		// Check for discover mode: scheme:/project-pattern/rest
+		if projectPattern, scheme, rest, ok := parseDiscoverPath(path); ok {
+			return runDiscoverRemove(cmd, scheme, projectPattern, rest)
+		}
+
 		// Resolve alias
 		r := resolver.Create(cfg)
 		var fullPath string
@@ -77,7 +83,7 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsCloudSQLPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -108,7 +114,7 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 		}
 
 		// Cloud Run, VM, and Pub/Sub handle their own listing/confirmation in Remove
-		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) {
+		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) || resolver.IsCloudSQLPath(fullPath) {
 			options := &resource.RemoveOptions{
 				Force:   rmForce,
 				Verbose: verbose,
@@ -214,6 +220,148 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 
 		return res.Remove(ctx, fullPath, options)
 	},
+}
+
+// runDiscoverRemove lists matching resources across projects, shows them, and asks for confirmation.
+func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) error {
+	ctx := context.Background()
+
+	projectIDs, err := resource.ListProjectIDs(ctx, projectPattern)
+	if err != nil {
+		return err
+	}
+	if len(projectIDs) == 0 {
+		fmt.Fprintf(os.Stderr, "No projects matching %s\n", projectPattern)
+		return nil
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Discover: %d projects matching %s\n", len(projectIDs), projectPattern)
+	}
+
+	r := resolver.Create(cfg)
+	factory := resource.CreateFactory(r.ReverseResolve)
+
+	// First pass: collect all matching resources across projects
+	type discoverMatch struct {
+		projectID string
+		info      *resource.ResourceInfo
+	}
+	var allMatches []discoverMatch
+
+	for _, projectID := range projectIDs {
+		var resourcePath string
+		switch scheme {
+		case "bq":
+			resourcePath = "bq://" + projectID
+			if rest != "" {
+				resourcePath += "." + rest
+			}
+		case "iam":
+			resourcePath = "iam://" + projectID
+			if rest != "" {
+				resourcePath += "/" + rest
+			}
+		default:
+			resourcePath = scheme + "://"
+			if rest != "" {
+				resourcePath += rest
+			}
+		}
+
+		res, err := factory.Create(resourcePath)
+		if err != nil {
+			continue
+		}
+
+		options := &resource.ListOptions{
+			ProjectID: projectID,
+			Region:    cfg.Defaults.Region,
+		}
+
+		resources, err := res.List(ctx, resourcePath, options)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
+			}
+			continue
+		}
+
+		for _, info := range resources {
+			allMatches = append(allMatches, discoverMatch{projectID: projectID, info: info})
+		}
+	}
+
+	if len(allMatches) == 0 {
+		fmt.Println("No matching resources found.")
+		return nil
+	}
+
+	// Show what will be deleted
+	fmt.Printf("Found %d resource(s) to delete:\n", len(allMatches))
+	for _, m := range allMatches {
+		fmt.Printf("  - %s:%s\n", m.projectID, m.info.Name)
+	}
+	fmt.Println()
+
+	if !rmForce {
+		fmt.Printf("Delete all %d resource(s)? (y/N): ", len(allMatches))
+		var response string
+		fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	// Collect only projects that had matches
+	matchedProjects := make(map[string]bool)
+	for _, m := range allMatches {
+		matchedProjects[m.projectID] = true
+	}
+
+	// Second pass: delete only in projects that had matches
+	for _, projectID := range projectIDs {
+		if !matchedProjects[projectID] {
+			continue
+		}
+		var resourcePath string
+		switch scheme {
+		case "bq":
+			resourcePath = "bq://" + projectID
+			if rest != "" {
+				resourcePath += "." + rest
+			}
+		case "iam":
+			resourcePath = "iam://" + projectID
+			if rest != "" {
+				resourcePath += "/" + rest
+			}
+		default:
+			resourcePath = scheme + "://"
+			if rest != "" {
+				resourcePath += rest
+			}
+		}
+
+		res, err := factory.Create(resourcePath)
+		if err != nil {
+			continue
+		}
+
+		options := &resource.RemoveOptions{
+			Force:   true, // Already confirmed above
+			Verbose: verbose,
+			Project: projectID,
+			Region:  cfg.Defaults.Region,
+		}
+
+		if err := res.Remove(ctx, resourcePath, options); err != nil {
+			fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
+		}
+	}
+
+	return nil
 }
 
 func init() {

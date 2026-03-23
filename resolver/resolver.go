@@ -32,7 +32,8 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") ||
 		strings.HasPrefix(aliasPath, "svc://") || strings.HasPrefix(aliasPath, "jobs://") || strings.HasPrefix(aliasPath, "worker://") ||
 		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") || strings.HasPrefix(aliasPath, "pubsub://") ||
-		strings.HasPrefix(aliasPath, "projects://") {
+		strings.HasPrefix(aliasPath, "projects://") || strings.HasPrefix(aliasPath, "sql://") ||
+		strings.HasPrefix(aliasPath, "lb://") || strings.HasPrefix(aliasPath, "certs://") {
 		return aliasPath, nil
 	}
 
@@ -263,6 +264,21 @@ func IsCloudRunPath(path string) bool {
 // IsDataflowPath checks if a string is a Dataflow path
 func IsDataflowPath(path string) bool {
 	return strings.HasPrefix(path, "dataflow://")
+}
+
+// IsCloudSQLPath checks if a string is a Cloud SQL path
+func IsCloudSQLPath(path string) bool {
+	return strings.HasPrefix(path, "sql://")
+}
+
+// IsLoadBalancerPath checks if a string is a load balancer path
+func IsLoadBalancerPath(path string) bool {
+	return strings.HasPrefix(path, "lb://")
+}
+
+// IsCertManagerPath checks if a string is a certificate manager path
+func IsCertManagerPath(path string) bool {
+	return strings.HasPrefix(path, "certs://")
 }
 
 // IsProjectsPath checks if a string is a projects path

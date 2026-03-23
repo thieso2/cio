@@ -40,12 +40,12 @@ func (i *InstanceInfo) FormatLong() string {
 	if ip == "" {
 		ip = "-"
 	}
-	return fmt.Sprintf("%-40s %-12s %-22s %-20s %-16s %s", i.Name, i.Status, machineType, zone, ip, created)
+	return fmt.Sprintf("%-55s %-12s %-22s %-20s %-16s %s", i.Name, i.Status, machineType, zone, ip, created)
 }
 
 // InstanceLongHeader returns the header for long instance listing.
 func InstanceLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %-22s %-20s %-16s %s", "NAME", "STATUS", "MACHINE_TYPE", "ZONE", "IP", "CREATED")
+	return fmt.Sprintf("%-55s %-12s %-22s %-20s %-16s %s", "NAME", "STATUS", "MACHINE_TYPE", "ZONE", "IP", "CREATED")
 }
 
 // shortZone extracts the zone name from a full zone URL.

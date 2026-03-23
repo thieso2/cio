@@ -40,7 +40,7 @@ Examples:
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it directly
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsPubSubPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsPubSubPath(path) || resolver.IsCloudSQLPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -78,7 +78,7 @@ Examples:
 			return fmt.Errorf("info command not supported for %s resources (use 'ls -l' instead)", res.Type())
 		}
 
-		// Pub/Sub needs project ID passed explicitly
+		// Some resources need project ID passed explicitly
 		var info *resource.ResourceInfo
 		if psRes, ok := res.(*resource.PubSubResource); ok {
 			projectID := cfg.Defaults.ProjectID
@@ -86,6 +86,12 @@ Examples:
 				return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 			}
 			info, err = psRes.InfoWithProject(ctx, fullPath, projectID)
+		} else if sqlRes, ok := res.(*resource.CloudSQLResource); ok {
+			projectID := cfg.Defaults.ProjectID
+			if projectID == "" {
+				return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
+			}
+			info, err = sqlRes.InfoWithProject(ctx, fullPath, projectID)
 		} else {
 			info, err = res.Info(ctx, fullPath)
 		}

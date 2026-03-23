@@ -143,3 +143,34 @@ func (r *ProjectsResource) FormatHeader() string {
 func (r *ProjectsResource) FormatLongHeader() string {
 	return ProjectsLongHeader()
 }
+
+// ListProjectIDs returns active project IDs matching the given pattern.
+func ListProjectIDs(ctx context.Context, pattern string) ([]string, error) {
+	client, err := resourcemanager.NewProjectsClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create projects client: %w", err)
+	}
+	defer client.Close()
+
+	it := client.SearchProjects(ctx, &resourcemanagerpb.SearchProjectsRequest{})
+
+	var ids []string
+	for {
+		p, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to list projects: %w", err)
+		}
+		if p.State != resourcemanagerpb.Project_ACTIVE {
+			continue
+		}
+		if pattern != "" && !resolver.MatchPattern(p.ProjectId, pattern) {
+			continue
+		}
+		ids = append(ids, p.ProjectId)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}

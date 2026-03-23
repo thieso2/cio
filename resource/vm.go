@@ -209,7 +209,11 @@ func (r *VMResource) Remove(ctx context.Context, p string, opts *RemoveOptions) 
 	}
 
 	if len(matched) == 0 {
-		fmt.Println("No matching instances found.")
+		zone, name := parseVMPath(p)
+		if zone == "*" {
+			zone = "all zones"
+		}
+		fmt.Printf("No matching instances found for %q in project %s (%s).\n", name, project, zone)
 		return nil
 	}
 
