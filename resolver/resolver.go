@@ -31,7 +31,8 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 	// If already a full path, return as-is
 	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") ||
 		strings.HasPrefix(aliasPath, "svc://") || strings.HasPrefix(aliasPath, "jobs://") || strings.HasPrefix(aliasPath, "worker://") ||
-		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") || strings.HasPrefix(aliasPath, "pubsub://") {
+		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") || strings.HasPrefix(aliasPath, "pubsub://") ||
+		strings.HasPrefix(aliasPath, "projects://") {
 		return aliasPath, nil
 	}
 
@@ -262,6 +263,11 @@ func IsCloudRunPath(path string) bool {
 // IsDataflowPath checks if a string is a Dataflow path
 func IsDataflowPath(path string) bool {
 	return strings.HasPrefix(path, "dataflow://")
+}
+
+// IsProjectsPath checks if a string is a projects path
+func IsProjectsPath(path string) bool {
+	return strings.HasPrefix(path, "projects://")
 }
 
 // IsVMPath checks if a string is a VM (Compute Engine) path

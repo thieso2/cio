@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## IMPORTANT: Keep Documentation Updated
+
+After implementing any feature, bug fix, or change, **always update this CLAUDE.md file** to reflect the latest knowledge and features. This file is the primary context source for the LLM — if it's outdated, future sessions will lack critical information. Update relevant sections: key capabilities, CLI commands, usage examples, implemented features, architecture diagrams, and any new patterns or conventions.
+
 ## Project Overview
 
 `cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, and Compute Engine that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
@@ -274,6 +278,8 @@ graph TB
   - IAM `-l` shows email, display name, and disabled status
   - VM: `vm://` lists zones, `vm://zone` lists instances, `vm://*/pattern*` wildcards
   - VM `-l` shows status, machine type, zone, IP, created time
+  - Cloud Run jobs: `cio ls -l jobs://` shows status, active/total executions, updated
+  - Cloud Run workers: `cio ls -l worker://` shows status, instance count, updated
   - Output uses alias format: `:am/file.txt` or `:mydata.table1`
 - **info.go**: Show detailed BigQuery table information
   - Displays table schema with nested RECORD fields
@@ -296,6 +302,15 @@ graph TB
   - Confirmation prompts unless `-f` is used
   - Displays alias paths in confirmations and output
   - **CRITICAL**: Only deletes when explicitly requested by user
+- **cancel.go**: Cancel running Cloud Run job executions (`cio cancel`)
+  - Cancel specific execution: `cio cancel jobs://job-name/execution-name`
+  - Cancel all running executions: `cio cancel 'jobs://job-name/*'`
+  - Parallel cancellation with per-execution timing output
+  - Force flag (`-f`) to skip confirmation
+- **scale.go**: Scale Cloud Run worker pool instances (`cio scale`)
+  - Example: `cio scale worker://pool-name 3`
+  - Scale to zero: `cio scale worker://pool-name 0`
+  - Uses `UpdateWorkerPool` API with `scaling.manual_instance_count`
 - **stop.go**: Stop VM instances (`cio stop`)
   - Stops running instances in parallel, skips already-stopped ones
   - Wildcard support: `cio stop 'vm://*/bastion-*'`
@@ -685,6 +700,40 @@ cio tail -f 'vm://*/*-ingress*'
 
 # Stream serial port output
 cio tail -f vm://europe-west3-a/my-instance/serial
+```
+
+### Cloud Run Examples
+```bash
+# List services with details
+cio ls -l svc://
+
+# List jobs with active/total execution counts
+cio ls -l jobs://
+
+# List worker pools with instance counts
+cio ls -l worker://
+
+# Cancel all running executions for a job
+cio cancel 'jobs://my-job/*'
+
+# Cancel a specific execution
+cio cancel jobs://my-job/my-job-execution-abc123
+
+# Force cancel without confirmation
+cio cancel -f 'jobs://my-job/*'
+
+# Scale a worker pool
+cio scale worker://iomp-processor 3
+
+# Scale to zero
+cio scale worker://iomp-processor 0
+
+# Tail Cloud Run service logs
+cio tail svc://my-service
+cio tail -f svc://my-service
+
+# Tail Cloud Run job logs
+cio tail -f jobs://my-job
 ```
 
 ## Future Features (Phase 7+)

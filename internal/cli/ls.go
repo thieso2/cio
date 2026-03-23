@@ -124,7 +124,7 @@ Examples (Pub/Sub):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {

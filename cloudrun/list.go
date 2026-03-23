@@ -8,6 +8,7 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"github.com/thieso2/cio/apilog"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/api/iterator"
 )
 
@@ -24,12 +25,14 @@ type ServiceInfo struct {
 
 // JobInfo holds information about a Cloud Run job.
 type JobInfo struct {
-	Name    string
-	Region  string
-	Project string
-	Status  string
-	Created time.Time
-	Updated time.Time
+	Name           string
+	Region         string
+	Project        string
+	Status         string
+	Created        time.Time
+	Updated        time.Time
+	ExecutionCount int32  // total executions ever
+	ActiveExecs    int32  // currently running/pending executions
 }
 
 // ExecutionInfo holds information about a Cloud Run job execution.
@@ -48,13 +51,13 @@ type ExecutionInfo struct {
 
 // WorkerPoolInfo holds information about a Cloud Run worker pool.
 type WorkerPoolInfo struct {
-	Name    string
-	Region  string
-	Project string
-	URI     string
-	Status  string
-	Created time.Time
-	Updated time.Time
+	Name          string
+	Region        string
+	Project       string
+	Status        string
+	Created       time.Time
+	Updated       time.Time
+	InstanceCount int32
 }
 
 // extractShortName extracts the short name from a full resource name.
@@ -185,10 +188,11 @@ func ListJobs(ctx context.Context, project, region string) ([]*JobInfo, error) {
 		}
 
 		info := &JobInfo{
-			Name:    extractShortName(job.Name),
-			Region:  region,
-			Project: project,
-			Status:  jobStatus(job),
+			Name:           extractShortName(job.Name),
+			Region:         region,
+			Project:        project,
+			Status:         jobStatus(job),
+			ExecutionCount: job.ExecutionCount,
 		}
 		if job.CreateTime != nil {
 			info.Created = job.CreateTime.AsTime()
@@ -196,6 +200,23 @@ func ListJobs(ctx context.Context, project, region string) ([]*JobInfo, error) {
 		if job.UpdateTime != nil {
 			info.Updated = job.UpdateTime.AsTime()
 		}
+
+		// Count active (running/pending) executions
+		if ref := job.LatestCreatedExecution; ref != nil {
+			if ref.CompletionStatus == runpb.ExecutionReference_EXECUTION_RUNNING ||
+				ref.CompletionStatus == runpb.ExecutionReference_EXECUTION_PENDING {
+				// At least the latest is active; list all executions to count active ones
+				execs, execErr := ListExecutions(ctx, project, region, info.Name)
+				if execErr == nil {
+					for _, e := range execs {
+						if e.Status == "Running" || e.Status == "Pending" {
+							info.ActiveExecs++
+						}
+					}
+				}
+			}
+		}
+
 		jobs = append(jobs, info)
 	}
 	return jobs, nil
@@ -318,6 +339,9 @@ func ListWorkerPools(ctx context.Context, project, region string) ([]*WorkerPool
 			Project: project,
 			Status:  workerPoolStatus(wp),
 		}
+		if wp.Scaling != nil && wp.Scaling.ManualInstanceCount != nil {
+			info.InstanceCount = *wp.Scaling.ManualInstanceCount
+		}
 		if wp.CreateTime != nil {
 			info.Created = wp.CreateTime.AsTime()
 		}
@@ -348,7 +372,7 @@ func (j *JobInfo) FormatShort() string { return j.Name }
 // FormatJobLong formats a job in long format.
 func (j *JobInfo) FormatJobLong() string {
 	updated := j.Updated.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-40s %-12s %s", j.Name, j.Status, updated)
+	return fmt.Sprintf("%-40s %-12s %7d %7d  %s", j.Name, j.Status, j.ActiveExecs, j.ExecutionCount, updated)
 }
 
 // FormatShort formats an execution in short format.
@@ -374,11 +398,7 @@ func (w *WorkerPoolInfo) FormatShort() string { return w.Name }
 // FormatWorkerPoolLong formats a worker pool in long format.
 func (w *WorkerPoolInfo) FormatWorkerPoolLong() string {
 	updated := w.Updated.Format("2006-01-02 15:04:05")
-	uri := w.URI
-	if uri == "" {
-		uri = "-"
-	}
-	return fmt.Sprintf("%-40s %-12s %-20s %s", w.Name, w.Status, updated, uri)
+	return fmt.Sprintf("%-40s %-12s %10d  %s", w.Name, w.Status, w.InstanceCount, updated)
 }
 
 // ServiceLongHeader returns the header for long service listing.
@@ -388,7 +408,7 @@ func ServiceLongHeader() string {
 
 // JobLongHeader returns the header for long job listing.
 func JobLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %s", "NAME", "STATUS", "UPDATED")
+	return fmt.Sprintf("%-40s %-12s %7s %7s  %s", "NAME", "STATUS", "ACTIVE", "TOTAL", "UPDATED")
 }
 
 // ExecutionLongHeader returns the header for long execution listing.
@@ -398,5 +418,38 @@ func ExecutionLongHeader() string {
 
 // WorkerPoolLongHeader returns the header for long worker pool listing.
 func WorkerPoolLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %-20s %s", "NAME", "STATUS", "UPDATED", "URL")
+	return fmt.Sprintf("%-40s %-12s %10s  %s", "NAME", "STATUS", "INSTANCES", "UPDATED")
+}
+
+// UpdateWorkerPoolInstances updates the manual instance count for a worker pool.
+func UpdateWorkerPoolInstances(ctx context.Context, project, region, name string, count int32) error {
+	client, err := GetWorkerPoolsClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create Cloud Run worker pools client: %w", err)
+	}
+
+	fullName := fmt.Sprintf("projects/%s/locations/%s/workerPools/%s", project, region, name)
+	apilog.Logf("[CloudRun] WorkerPools.Update(%s, instances=%d)", fullName, count)
+
+	op, err := client.UpdateWorkerPool(ctx, &runpb.UpdateWorkerPoolRequest{
+		WorkerPool: &runpb.WorkerPool{
+			Name: fullName,
+			Scaling: &runpb.WorkerPoolScaling{
+				ManualInstanceCount: &count,
+			},
+		},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"scaling.manual_instance_count"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update worker pool: %w", err)
+	}
+
+	_, err = op.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("failed waiting for worker pool update: %w", err)
+	}
+
+	return nil
 }

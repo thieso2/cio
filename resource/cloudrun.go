@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/thieso2/cio/cloudrun"
 	"github.com/thieso2/cio/dataflow"
@@ -412,17 +414,33 @@ func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOpt
 		}
 	}
 
-	for _, exec := range toCancel {
-		if opts != nil && opts.Verbose {
-			fmt.Printf("Cancelling %s...\n", exec.Name)
-		}
-		if err := cloudrun.CancelExecution(ctx, project, region, parsed.name, exec.Name); err != nil {
-			return err
-		}
-		fmt.Printf("Cancelled: %s\n", exec.Name)
-	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
 
-	return nil
+	for _, exec := range toCancel {
+		wg.Add(1)
+		go func(e *cloudrun.ExecutionInfo) {
+			defer wg.Done()
+			start := time.Now()
+			err := cloudrun.CancelExecution(ctx, project, region, parsed.name, e.Name)
+			elapsed := time.Since(start).Round(time.Millisecond)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				fmt.Printf("Failed: %s (%v)\n", e.Name, err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
+				fmt.Printf("Cancelled: %s (took %s)\n", e.Name, elapsed)
+			}
+		}(exec)
+	}
+	wg.Wait()
+
+	return firstErr
 }
 
 // Info returns detailed information about a Cloud Run resource.
