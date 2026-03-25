@@ -14,13 +14,13 @@ import (
 
 // InstanceInfo holds information about a Compute Engine VM instance.
 type InstanceInfo struct {
-	Name        string
-	Zone        string
-	MachineType string
-	Status      string
-	InternalIP  string
-	ExternalIP  string
-	Created     time.Time
+	Name        string    `json:"name"`
+	Zone        string    `json:"zone"`
+	MachineType string    `json:"machine_type"`
+	Status      string    `json:"status"`
+	InternalIP  string    `json:"internal_ip,omitempty"`
+	ExternalIP  string    `json:"external_ip,omitempty"`
+	Created     time.Time `json:"created"`
 }
 
 // FormatShort formats an instance in short format (zone/name).

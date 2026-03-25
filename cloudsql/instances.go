@@ -12,23 +12,23 @@ import (
 
 // InstanceInfo holds information about a Cloud SQL instance.
 type InstanceInfo struct {
-	Name             string
-	State            string
-	DatabaseVersion  string
-	Region           string
-	Tier             string
-	IP               string
-	DiskSizeGB       int64
-	AvailabilityType string
-	ConnectionName   string
-	Created          time.Time
+	Name             string    `json:"name"`
+	State            string    `json:"state"`
+	DatabaseVersion  string    `json:"database_version"`
+	Region           string    `json:"region"`
+	Tier             string    `json:"tier"`
+	IP               string    `json:"ip,omitempty"`
+	DiskSizeGB       int64     `json:"disk_size_gb"`
+	AvailabilityType string    `json:"availability_type"`
+	ConnectionName   string    `json:"connection_name"`
+	Created          time.Time `json:"created"`
 	raw              *sqladmin.DatabaseInstance
 }
 
 // DatabaseInfo holds information about a database in a Cloud SQL instance.
 type DatabaseInfo struct {
-	Name    string
-	Charset string
+	Name    string `json:"name"`
+	Charset string `json:"charset"`
 }
 
 func instanceInfoFrom(inst *sqladmin.DatabaseInstance) *InstanceInfo {

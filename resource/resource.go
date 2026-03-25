@@ -16,20 +16,20 @@ const (
 
 // ResourceInfo holds unified information about a resource (object, table, dataset, etc.)
 type ResourceInfo struct {
-	Path        string    // Full path (gs://... or bq://... or iam://...)
-	Name        string    // Just the name component
-	Type        string    // "file", "directory", "table", "dataset", "service-account"
-	Size        int64     // Size in bytes
-	Rows        int64     // Number of rows (BigQuery only)
-	Created     time.Time // Creation time
-	Modified    time.Time // Last modified time
-	Description string    // Description (if available)
-	Location    string    // Location/region
-	IsDir       bool      // Is this a directory?
+	Path        string    `json:"path"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Size        int64     `json:"size,omitempty"`
+	Rows        int64     `json:"rows,omitempty"`
+	Created     time.Time `json:"created,omitempty"`
+	Modified    time.Time `json:"modified,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Location    string    `json:"location,omitempty"`
+	IsDir       bool      `json:"is_dir,omitempty"`
 
 	// For detailed info (BigQuery schema, IAM account info, etc.)
-	Details  interface{} // Type-specific details
-	Metadata interface{} // Type-specific metadata for formatting
+	Details  interface{} `json:"details,omitempty"`
+	Metadata interface{} `json:"metadata,omitempty"`
 }
 
 // ListOptions contains options for listing resources
@@ -43,6 +43,7 @@ type ListOptions struct {
 	Region        string // GCP Region (for Cloud Run)
 	ActiveOnly    bool   // Only show active resources (for Dataflow)
 	AllStatuses   bool   // Show all statuses (e.g., include completed executions)
+	Month         string // Month filter for billing (YYYYMM format)
 }
 
 // RemoveOptions contains options for removing resources

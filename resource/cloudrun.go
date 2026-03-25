@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -238,10 +239,7 @@ func (r *CloudRunResource) listWorkerPools(ctx context.Context, project, region 
 func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOptions) error {
 	parsed := parseCloudRunPath(p)
 	if parsed.scheme != "jobs" || parsed.name == "" {
-		return fmt.Errorf("rm only supports Cloud Run job executions (jobs://job-name/execution-name)")
-	}
-	if parsed.execution == "" {
-		return fmt.Errorf("rm requires an execution name: jobs://job-name/execution-name or jobs://job-name/*")
+		return fmt.Errorf("rm only supports Cloud Run jobs (jobs://job-name) or executions (jobs://job-name/execution-name)")
 	}
 
 	var project, region string
@@ -254,6 +252,69 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 	}
 	if region == "" {
 		return fmt.Errorf("region is required (use --region flag or set defaults.region in config)")
+	}
+
+	// No execution specified: delete the job itself
+	if parsed.execution == "" {
+		// Check if name has wildcards
+		if strings.ContainsAny(parsed.name, "*?") {
+			// List jobs and filter by pattern
+			jobs, err := cloudrun.ListJobs(ctx, project, region)
+			if err != nil {
+				return err
+			}
+			var toDelete []*cloudrun.JobInfo
+			for _, job := range jobs {
+				if ok, _ := path.Match(parsed.name, job.Name); ok {
+					toDelete = append(toDelete, job)
+				}
+			}
+			if len(toDelete) == 0 {
+				fmt.Println("No matching jobs found.")
+				return nil
+			}
+			fmt.Printf("Found %d job(s) to delete:\n", len(toDelete))
+			for _, job := range toDelete {
+				fmt.Printf("  - %s\n", job.Name)
+			}
+			fmt.Println()
+			if opts == nil || !opts.Force {
+				fmt.Printf("Delete all %d job(s)? (y/N): ", len(toDelete))
+				var response string
+				fmt.Scanln(&response)
+				if response != "y" && response != "Y" {
+					fmt.Println("Cancelled.")
+					return nil
+				}
+			}
+			for _, job := range toDelete {
+				if opts != nil && opts.Verbose {
+					fmt.Printf("Deleting job %s...\n", job.Name)
+				}
+				if err := cloudrun.DeleteJob(ctx, project, region, job.Name); err != nil {
+					fmt.Fprintf(os.Stderr, "Error deleting job %s: %v\n", job.Name, err)
+					continue
+				}
+				fmt.Printf("Deleted: %s\n", job.Name)
+			}
+			return nil
+		}
+
+		// Single job deletion
+		if opts == nil || !opts.Force {
+			fmt.Printf("Delete job %s? (y/N): ", parsed.name)
+			var response string
+			fmt.Scanln(&response)
+			if response != "y" && response != "Y" {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+		}
+		if err := cloudrun.DeleteJob(ctx, project, region, parsed.name); err != nil {
+			return err
+		}
+		fmt.Printf("Deleted: %s\n", parsed.name)
+		return nil
 	}
 
 	// Single execution deletion

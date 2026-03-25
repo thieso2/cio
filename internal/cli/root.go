@@ -16,6 +16,7 @@ var (
 	projectID   string
 	region      string
 	verbose     bool
+	outputJSON  bool
 	parallelism int // Number of concurrent operations (cp/rm)
 
 	// Global config instance
@@ -140,6 +141,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP project ID (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&region, "region", "", "GCP region (overrides config)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "output in JSON format")
 	rootCmd.PersistentFlags().IntVarP(&parallelism, "parallel", "j", 50, "number of parallel operations for cp/rm (1-200, can also be set via CIO_PARALLEL env var or config file)")
 }
 

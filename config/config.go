@@ -16,12 +16,19 @@ type ServerConfig struct {
 	AutoStart bool   `yaml:"auto_start"`
 }
 
+// BillingConfig holds billing/cost configuration
+type BillingConfig struct {
+	Table         string `yaml:"table"`          // BigQuery billing export table (project.dataset.table)
+	DetailedTable string `yaml:"detailed_table"` // Detailed billing export table (optional)
+}
+
 // Config represents the application configuration
 type Config struct {
 	Mappings map[string]string `yaml:"mappings"`
 	Defaults Defaults          `yaml:"defaults"`
 	Server   ServerConfig      `yaml:"server"`
 	Download DownloadConfig    `yaml:"download"`
+	Billing  BillingConfig     `yaml:"billing"`
 	filePath string            // Store the path where config was loaded from
 }
 
@@ -175,6 +182,10 @@ func (c *Config) expandEnvVars() {
 	// Expand in defaults
 	c.Defaults.ProjectID = os.ExpandEnv(c.Defaults.ProjectID)
 	c.Defaults.Region = os.ExpandEnv(c.Defaults.Region)
+
+	// Expand in billing
+	c.Billing.Table = os.ExpandEnv(c.Billing.Table)
+	c.Billing.DetailedTable = os.ExpandEnv(c.Billing.DetailedTable)
 }
 
 // AddMapping adds or updates a mapping

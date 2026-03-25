@@ -31,6 +31,15 @@ Examples (BigQuery):
   cio rm -r :mydata
 
 Examples (Cloud Run Jobs):
+  # Delete a job
+  cio rm jobs://my-job
+
+  # Delete jobs matching a pattern
+  cio rm 'jobs://sqlmesh-*'
+
+  # Delete jobs across projects (discover mode)
+  cio rm 'jobs:/my-project/sqlmesh-*'
+
   # Remove a specific execution
   cio rm jobs://my-job/my-job-abc123
 

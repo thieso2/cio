@@ -154,8 +154,8 @@ func (r *VMResource) listZones(ctx context.Context, project string) ([]*Resource
 
 // zoneInfo is used as Metadata for zone listings.
 type zoneInfo struct {
-	Name          string
-	InstanceCount int
+	Name          string `json:"name"`
+	InstanceCount int    `json:"instance_count"`
 }
 
 // MatchVMInstances resolves a vm:// path to matching instances.

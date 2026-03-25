@@ -27,10 +27,10 @@ func parseTime(s string) time.Time {
 
 // UrlMapInfo holds information about a URL map (load balancer).
 type UrlMapInfo struct {
-	Name           string
-	DefaultService string
-	HostRuleCount  int
-	Created        time.Time
+	Name           string    `json:"name"`
+	DefaultService string    `json:"default_service"`
+	HostRuleCount  int       `json:"host_rule_count"`
+	Created        time.Time `json:"created"`
 }
 
 func (u *UrlMapInfo) FormatShort() string { return u.Name }
@@ -46,13 +46,13 @@ func UrlMapLongHeader() string {
 
 // ForwardingRuleInfo holds information about a forwarding rule.
 type ForwardingRuleInfo struct {
-	Name                string
-	IPAddress           string
-	Protocol            string
-	PortRange           string
-	Target              string
-	LoadBalancingScheme string
-	Created             time.Time
+	Name                string    `json:"name"`
+	IPAddress           string    `json:"ip_address"`
+	Protocol            string    `json:"protocol"`
+	PortRange           string    `json:"port_range"`
+	Target              string    `json:"target"`
+	LoadBalancingScheme string    `json:"load_balancing_scheme"`
+	Created             time.Time `json:"created"`
 }
 
 func (f *ForwardingRuleInfo) FormatShort() string { return f.Name }
@@ -70,11 +70,11 @@ func ForwardingRuleLongHeader() string {
 
 // BackendServiceInfo holds information about a backend service.
 type BackendServiceInfo struct {
-	Name         string
-	Protocol     string
-	BackendCount int
-	TimeoutSec   int64
-	Created      time.Time
+	Name         string    `json:"name"`
+	Protocol     string    `json:"protocol"`
+	BackendCount int       `json:"backend_count"`
+	TimeoutSec   int64     `json:"timeout_sec"`
+	Created      time.Time `json:"created"`
 }
 
 func (b *BackendServiceInfo) FormatShort() string { return b.Name }

@@ -17,10 +17,10 @@ const TypeProjects Type = "projects"
 
 // ProjectInfo holds information about a GCP project.
 type ProjectInfo struct {
-	ProjectID   string
-	DisplayName string
-	State       string
-	Created     time.Time
+	ProjectID   string    `json:"project_id"`
+	DisplayName string    `json:"display_name,omitempty"`
+	State       string    `json:"state"`
+	Created     time.Time `json:"created"`
 }
 
 func (p *ProjectInfo) FormatShort() string {

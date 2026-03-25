@@ -26,14 +26,14 @@ func getService(ctx context.Context) (*df.Service, error) {
 
 // JobInfo holds summary information about a Dataflow job.
 type JobInfo struct {
-	ID          string
-	Name        string
-	State       string
-	Type        string
-	Region      string
-	Created     time.Time
-	StartTime   time.Time
-	StateTime   time.Time // time of last state change
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	State     string    `json:"state"`
+	Type      string    `json:"type"`
+	Region    string    `json:"region"`
+	Created   time.Time `json:"created"`
+	StartTime time.Time `json:"start_time"`
+	StateTime time.Time `json:"state_time"`
 }
 
 // FormatShort returns a short one-line representation.

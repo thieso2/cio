@@ -13,8 +13,6 @@ import (
 	"github.com/thieso2/cio/resource"
 )
 
-var infoJSON bool
-
 var infoCmd = &cobra.Command{
 	Use:   "info <path>",
 	Short: "Show detailed information about resources",
@@ -104,7 +102,7 @@ Examples:
 			displayPath = r.ReverseResolve(info.Path)
 		}
 
-		if infoJSON {
+		if outputJSON {
 			return printInfoJSON(info, displayPath)
 		}
 
@@ -143,7 +141,7 @@ func handleBQWildcardInfo(ctx context.Context, fullPath string, _ *resource.Fact
 	}
 
 	// For JSON mode, collect all results into an array
-	if infoJSON {
+	if outputJSON {
 		var jsonResults []*bigquery.InfoJSON
 		for _, table := range matched {
 			// Parse table name from path
@@ -212,6 +210,5 @@ func printInfoJSON(info *resource.ResourceInfo, displayPath string) error {
 }
 
 func init() {
-	infoCmd.Flags().BoolVar(&infoJSON, "json", false, "Output in JSON format")
 	rootCmd.AddCommand(infoCmd)
 }

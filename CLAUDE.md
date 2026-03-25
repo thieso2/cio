@@ -8,7 +8,7 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
 
 ## Project Overview
 
-`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, Compute Engine, Cloud SQL, Load Balancers, and Certificate Manager that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
+`cio` (Cloud IO) is a fast Go CLI tool for Google Cloud Storage, BigQuery, IAM, Cloud Run, Dataflow, Compute Engine, Cloud SQL, Load Balancers, Certificate Manager, and Billing/Cost data that replaces lengthy `gcloud` and `bq` commands with short, memorable aliases. It maps user-defined aliases to full resource paths, enabling commands like `cio ls :am` instead of `gcloud storage ls gs://io-spooler-onprem-archived-metrics/` or `cio ls vm://` to list VM zones.
 
 **Alias Syntax:**
 - Aliases are prefixed with `:` to distinguish them from regular paths
@@ -27,6 +27,7 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
   - Projects: `projects://`
   - Dataflow: `dataflow://`
   - VM: `vm://zone/instance-name`
+  - Cost/Billing: `cost://` (queries BigQuery billing export)
 - Familiar Unix-like commands (`ls`, `cp`, `rm`, `stop`, `start`, `tail`, `scale`, `cancel` with various flags)
 - Wildcard pattern support (`*.log`, `2024-*.csv`) for GCS, VM, and all resource types
 - **Discover mode**: query resources across multiple projects with single-slash syntax (`scheme:/project-pattern/rest`)
@@ -39,8 +40,10 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
 - Load Balancers: list URL maps, forwarding rules, backend services
 - Certificate Manager: list certificates, certificate maps, map entries
 - Projects: list accessible GCP projects with filtering
+- Cost/Billing: query BigQuery billing export for cost breakdowns by service, project, or day
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
+- JSON output (`--json`) for all list operations
 - Singleton client pattern for performance (GCS, BigQuery, IAM, Cloud Run, Dataflow, Compute, Cloud SQL, LB, CertManager)
 - Bidirectional file transfer (local ↔ GCS) with parallel chunked downloads
 - FUSE filesystem support for GCS, BigQuery, and IAM (experimental)
@@ -109,6 +112,7 @@ graph TB
         CRRes["CloudRunResource"]
         DFRes["DataflowResource"]
         VMRes["VMResource"]
+        CostRes["CostResource"]
     end
 
     subgraph "Resolution Layer"
@@ -161,6 +165,7 @@ graph TB
     Interface --> CRRes
     Interface --> DFRes
     Interface --> VMRes
+    Interface --> CostRes
 
     GCSRes --> StorageClient
     BQRes --> BQClient
@@ -168,6 +173,7 @@ graph TB
     CRRes --> CRClient
     DFRes --> DFClient
     VMRes --> ComputeClient
+    CostRes --> BQClient
 
     StorageClient --> GCSAPI
     BQClient --> BQAPI
@@ -194,6 +200,7 @@ graph TB
   - `CloudRunResource` - handles Cloud Run services, jobs, executions, worker pools
   - `DataflowResource` - handles Dataflow jobs
   - `VMResource` - handles Compute Engine VM instances and zones
+  - `CostResource` - handles billing cost data via BigQuery export
 - `Factory` - creates appropriate resource handler based on path type
 - `ResourceInfo` - unified data structure for resource metadata
 - Benefits:
@@ -220,14 +227,16 @@ graph TB
   - `IsCloudRunPath()` checks for `svc://`, `jobs://`, `worker://` prefixes
   - `IsDataflowPath()` checks for `dataflow://` prefix
   - `IsVMPath()` checks for `vm://` prefix
+  - `IsCostPath()` checks for `cost://` prefix
 - **Important**: Input must start with `:` for alias paths (e.g., `:am/path` or `:mydata`)
 
-**2. Configuration System (`internal/config/`)**
+**2. Configuration System (`config/`)**
 - YAML-based config with environment variable expansion (`${VAR}` syntax)
 - Config resolution order: `--config` flag → `CIO_CONFIG` env → `~/.config/cio/config.yaml` → `~/.cio/config.yaml`
 - Default region: `europe-west3` (per global CLAUDE.md)
 - `Config.Validate()` ensures aliases don't contain `/` or `.` and paths start with `gs://`
 - Auto-creates config directory on first `Save()`
+- `BillingConfig` section for cost provider: `billing.table` and `billing.detailed_table`
 
 **3. Storage Client (`internal/storage/`)**
 - **Singleton pattern**: `GetClient()` uses `sync.Once` to create GCS client once per process
@@ -277,7 +286,7 @@ graph TB
   - `PersistentPreRunE` loads config and overrides with CLI flags
 - **map.go**: Manage alias mappings (`map <alias> <path>`, `map list`, `map show`, `map delete`)
   - Aliases created without `:` but used with it
-- **ls.go**: List GCS objects, BigQuery datasets/tables, IAM, Cloud Run, Dataflow, or VMs
+- **ls.go**: List GCS objects, BigQuery datasets/tables, IAM, Cloud Run, Dataflow, VMs, or costs
   - GCS: formatting options (`-l`, `-r`, `--human-readable`, `--max-results`)
   - GCS wildcards: `cio ls ':am/logs/*.log'`
   - BigQuery: lists datasets (`bq://project`) or tables (`bq://project.dataset`)
@@ -289,6 +298,10 @@ graph TB
   - VM `-l` shows status, machine type, zone, IP, created time
   - Cloud Run jobs: `cio ls -l jobs://` shows status, active/total executions, updated
   - Cloud Run workers: `cio ls -l worker://` shows status, instance count, updated
+  - Cost: `cio ls cost://` by service, `cost://projects`, `cost://daily`, `cost://daily/services`
+  - `--json` flag outputs all resources as a JSON array
+  - `--month YYYY-MM` filter for billing data (default: current month)
+  - `--sort=cost|gross|credits` sort for cost output
   - Output uses alias format: `:am/file.txt` or `:mydata.table1`
 - **info.go**: Show detailed BigQuery table information
   - Displays table schema with nested RECORD fields
@@ -314,6 +327,7 @@ graph TB
 - **cancel.go**: Cancel running Cloud Run job executions (`cio cancel`)
   - Cancel specific execution: `cio cancel jobs://job-name/execution-name`
   - Cancel all running executions: `cio cancel 'jobs://job-name/*'`
+  - Discover mode: `cio cancel 'jobs:/iom-*/sqlmesh*/*'` (across projects)
   - Parallel cancellation with per-execution timing output
   - Force flag (`-f`) to skip confirmation
 - **scale.go**: Scale Cloud Run worker pool instances (`cio scale`)
@@ -596,6 +610,29 @@ cio cp -j 1 --verbose gs://bucket/large.zip /tmp/
 - ✅ Serial port tail: `cio tail -f vm://zone/instance/serial`
 - ✅ Parallel operations for stop/delete with verbose progress output
 
+### Cost/Billing Support - Completed
+- ✅ Cost resource type (`cost://`) querying BigQuery billing export
+- ✅ Config: `billing.table` and `billing.detailed_table` in YAML
+- ✅ Views: by service (default), by project, daily, daily by service, daily for specific service
+- ✅ Project filtering with wildcards: `cost://iom-*/daily`
+- ✅ Single-slash syntax rewritten to cost:// (no discover mode needed — SQL handles project filtering)
+- ✅ `--month YYYY-MM` flag for historical data
+- ✅ `--sort=cost|gross|credits` for cost-specific sorting
+- ✅ Dynamic column widths for aligned output
+- ✅ Total row printed after results
+- ✅ `-l` shows gross, credits, and net cost breakdown
+- ✅ `--json` output support
+
+### Cancel Discover Mode - Completed
+- ✅ `cio cancel 'jobs:/project-pattern/job-pattern/*'` across projects
+- ✅ Wildcard job name matching (lists jobs, filters by pattern)
+- ✅ Per-project execution cancellation
+
+### JSON Output - Completed
+- ✅ `--json` flag on `cio ls` for all resource types
+- ✅ ResourceInfo struct has JSON tags
+- ✅ Works with discover mode (collects all results, outputs single array)
+
 ## Usage Examples
 
 ### GCS Examples
@@ -735,6 +772,10 @@ cio cancel jobs://my-job/my-job-execution-abc123
 # Force cancel without confirmation
 cio cancel -f 'jobs://my-job/*'
 
+# Cancel across projects (discover mode)
+cio cancel 'jobs:/iom-*/sqlmesh*/*'
+cio cancel -f 'jobs:/iom-dev-thies/sqlmesh*/*'
+
 # Scale a worker pool
 cio scale worker://iomp-processor 3
 
@@ -813,6 +854,66 @@ cio ls -l projects://
 cio ls -l 'projects://iom-*'
 ```
 
+### Cost/Billing Examples
+```bash
+# Cost by service for current month (net cost)
+cio ls cost://
+
+# Cost by service with gross/credits/net breakdown
+cio ls -l cost://
+
+# Cost for a specific project
+cio ls cost://my-project-id
+
+# Cost for projects matching a wildcard
+cio ls -l cost://iom-pro*
+
+# Cost by project (all projects in billing account)
+cio ls cost://projects
+
+# Cost by project for matching projects
+cio ls -l cost://iom-*/projects
+
+# Daily cost trend
+cio ls cost://daily
+cio ls cost://my-project/daily
+
+# Daily breakdown by service (with project prefix)
+cio ls -l cost:/iom-pro*/daily/services
+
+# Daily for a specific service
+cio ls cost://daily/BigQuery
+cio ls cost://iom-pro*/daily/Cloud Run
+
+# Specific month
+cio ls cost:// --month 2026-02
+cio ls -l cost://iom-*/projects --month 2026-01
+
+# Sort by cost (descending)
+cio ls -l --sort=cost cost:/iom-pro*/daily/services
+cio ls -l --sort=gross cost://
+cio ls -l --sort=credits cost://
+
+# JSON output
+cio ls --json cost://
+cio ls --json cost://iom-pro*/daily
+```
+
+**Config requirement** — add to `~/.config/cio/config.yaml`:
+```yaml
+billing:
+  table: project-id.dataset.gcp_billing_export_v1_XXXXXX_YYYYYY_ZZZZZZ
+  detailed_table: project-id.dataset.gcp_billing_export_resource_v1_XXXXXX_YYYYYY_ZZZZZZ  # optional
+```
+
+**Notes:**
+- Data comes from BigQuery billing export (must be enabled in GCP Console)
+- Data latency: hours to ~24h (not real-time)
+- The table name includes your billing account ID (hyphens → underscores)
+- Queries always filter by `invoice.month` to avoid full table scans
+- Net cost = gross cost + credits (credits are negative)
+- Single-slash syntax (`cost:/project-pattern/...`) works but doesn't use discover mode — project filtering happens in the SQL WHERE clause
+
 ### Discover Mode (Multi-Project)
 ```bash
 # Single slash = discover mode (query across matching projects)
@@ -835,6 +936,9 @@ cio rm 'vm:/iom-*/*/staging-*'
 
 # Stop VMs across projects
 cio stop 'vm:/iom-*/*/bast*'
+
+# Cancel Cloud Run job executions across projects
+cio cancel 'jobs:/iom-*/sqlmesh*/*'
 ```
 
 ## Future Features (Phase 7+)

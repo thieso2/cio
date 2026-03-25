@@ -24,6 +24,8 @@ var (
 	lsSortByTime    bool
 	lsActiveOnly    bool
 	lsAll           bool
+	lsMonth         string
+	lsSort          string
 )
 
 var lsCmd = &cobra.Command{
@@ -118,9 +120,17 @@ Examples (Pub/Sub):
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		// Check for discover mode: scheme://[project-pattern]/rest
+		// Check for discover mode: scheme:/project-pattern/rest
 		if projectPattern, scheme, rest, ok := parseDiscoverPath(path); ok {
-			return runDiscoverMode(cmd, scheme, projectPattern, rest)
+			if scheme == "cost" {
+				// cost:// handles project filtering internally via SQL — rewrite to cost:// path
+				path = "cost://" + projectPattern
+				if rest != "" {
+					path += "/" + rest
+				}
+			} else {
+				return runDiscoverMode(cmd, scheme, projectPattern, rest)
+			}
 		}
 
 		// Resolve alias to full path if needed
@@ -130,7 +140,7 @@ Examples (Pub/Sub):
 		var inputWasAlias bool
 
 		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) || resolver.IsCloudSQLPath(path) || resolver.IsLoadBalancerPath(path) || resolver.IsCertManagerPath(path) {
+		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) || resolver.IsCloudSQLPath(path) || resolver.IsLoadBalancerPath(path) || resolver.IsCertManagerPath(path) || resolver.IsCostPath(path) {
 			fullPath = path
 			inputWasAlias = false
 		} else {
@@ -149,6 +159,7 @@ Examples (Pub/Sub):
 
 		// Create resource factory
 		factory := resource.CreateFactory(r.ReverseResolve)
+		factory.BillingTable = cfg.Billing.Table
 
 		// Get appropriate resource handler
 		res, err := factory.Create(fullPath)
@@ -157,6 +168,12 @@ Examples (Pub/Sub):
 		}
 
 		// List resources
+		// Convert --month flag to YYYYMM format if provided as YYYY-MM
+		month := lsMonth
+		if len(month) == 7 && month[4] == '-' {
+			month = month[:4] + month[5:]
+		}
+
 		options := &resource.ListOptions{
 			Recursive:     lsRecursive,
 			LongFormat:    lsLongFormat,
@@ -166,6 +183,7 @@ Examples (Pub/Sub):
 			Region:        cfg.Defaults.Region,
 			ActiveOnly:    lsActiveOnly,
 			AllStatuses:   lsAll,
+			Month:         month,
 		}
 
 		resources, err := res.List(ctx, fullPath, options)
@@ -182,6 +200,11 @@ Examples (Pub/Sub):
 		}
 		sortResources(resources, lsSortBySize, sortByTime)
 
+		// Cost-specific sorting: --sort=cost|net|gross|credits
+		if resolver.IsCostPath(fullPath) && lsSort != "" {
+			resource.SortCostBy(resources, lsSort)
+		}
+
 		// Handle empty results
 		if len(resources) == 0 {
 			if verbose {
@@ -193,6 +216,11 @@ Examples (Pub/Sub):
 		// Determine whether to reverse-map output
 		// Only reverse-map if: input was an alias AND --no-map flag is not set
 		shouldReverseMap := inputWasAlias && !lsNoMap
+
+		// JSON mode: output all resources as JSON array
+		if outputJSON {
+			return printResourcesJSON(resources)
+		}
 
 		// Raw mode: output paths without protocol prefix
 		if lsRaw {
@@ -207,6 +235,13 @@ Examples (Pub/Sub):
 		if resolver.IsPubSubPath(fullPath) && hasMixedTypes(resources) {
 			printPubSubSections(resources, res, r, shouldReverseMap, lsLongFormat)
 			return nil
+		}
+
+		// Cost always shows a header (even in short format)
+		if resolver.IsCostPath(fullPath) && !lsLongFormat {
+			if cr, ok := res.(*resource.CostResource); ok {
+				fmt.Println(cr.FormatHeader())
+			}
 		}
 
 		// Print header for long format if resource type provides one
@@ -234,6 +269,11 @@ Examples (Pub/Sub):
 			} else {
 				fmt.Println(res.FormatShort(info, displayPath))
 			}
+		}
+
+		// Print total line for cost output
+		if resolver.IsCostPath(fullPath) && len(resources) > 1 {
+			resource.PrintCostTotal(resources, lsLongFormat)
 		}
 
 		return nil
@@ -436,6 +476,9 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 	r := resolver.Create(cfg)
 	factory := resource.CreateFactory(r.ReverseResolve)
 
+	// JSON mode: collect all resources across projects, output as single array
+	var allResources []*resource.ResourceInfo
+
 	headerPrinted := false
 
 	for _, projectID := range projectIDs {
@@ -518,16 +561,28 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 			headerPrinted = true
 		}
 
-		// Print results with project prefix
+		// Prefix project name to each resource
 		for _, info := range resources {
 			prefixResourceName(info, projectID)
+		}
 
+		if outputJSON {
+			allResources = append(allResources, resources...)
+			continue
+		}
+
+		// Print results with project prefix
+		for _, info := range resources {
 			if lsLongFormat {
 				fmt.Println(res.FormatLong(info, info.Path))
 			} else {
 				fmt.Println(res.FormatShort(info, info.Path))
 			}
 		}
+	}
+
+	if outputJSON {
+		return printResourcesJSON(allResources)
 	}
 
 	return nil
@@ -546,6 +601,8 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsSortByTime, "sort-time", "t", false, "sort by modification time (newest first)")
 	lsCmd.Flags().BoolVar(&lsActiveOnly, "active", false, "show only active jobs (Dataflow)")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "show all statuses (include completed/failed executions)")
+	lsCmd.Flags().StringVar(&lsMonth, "month", "", "billing month (YYYY-MM or YYYYMM, default: current month)")
+	lsCmd.Flags().StringVar(&lsSort, "sort", "", "sort order for cost output (cost = by cost descending)")
 
 	// Add to root command
 	rootCmd.AddCommand(lsCmd)

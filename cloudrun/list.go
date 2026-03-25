@@ -14,50 +14,50 @@ import (
 
 // ServiceInfo holds information about a Cloud Run service.
 type ServiceInfo struct {
-	Name    string
-	Region  string
-	Project string
-	URI     string
-	Status  string
-	Created time.Time
-	Updated time.Time
+	Name    string    `json:"name"`
+	Region  string    `json:"region"`
+	Project string    `json:"project"`
+	URI     string    `json:"uri"`
+	Status  string    `json:"status"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
 }
 
 // JobInfo holds information about a Cloud Run job.
 type JobInfo struct {
-	Name           string
-	Region         string
-	Project        string
-	Status         string
-	Created        time.Time
-	Updated        time.Time
-	ExecutionCount int32  // total executions ever
-	ActiveExecs    int32  // currently running/pending executions
+	Name           string    `json:"name"`
+	Region         string    `json:"region"`
+	Project        string    `json:"project"`
+	Status         string    `json:"status"`
+	Created        time.Time `json:"created"`
+	Updated        time.Time `json:"updated"`
+	ExecutionCount int32     `json:"execution_count"`
+	ActiveExecs    int32     `json:"active_executions"`
 }
 
 // ExecutionInfo holds information about a Cloud Run job execution.
 type ExecutionInfo struct {
-	Name      string
-	JobName   string
-	Region    string
-	Project   string
-	Status    string
-	StartTime time.Time
-	EndTime   time.Time
-	Succeeded int32
-	Failed    int32
-	Running   int32
+	Name      string    `json:"name"`
+	JobName   string    `json:"job_name"`
+	Region    string    `json:"region"`
+	Project   string    `json:"project"`
+	Status    string    `json:"status"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Succeeded int32     `json:"succeeded"`
+	Failed    int32     `json:"failed"`
+	Running   int32     `json:"running"`
 }
 
 // WorkerPoolInfo holds information about a Cloud Run worker pool.
 type WorkerPoolInfo struct {
-	Name          string
-	Region        string
-	Project       string
-	Status        string
-	Created       time.Time
-	Updated       time.Time
-	InstanceCount int32
+	Name          string    `json:"name"`
+	Region        string    `json:"region"`
+	Project       string    `json:"project"`
+	Status        string    `json:"status"`
+	Created       time.Time `json:"created"`
+	Updated       time.Time `json:"updated"`
+	InstanceCount int32     `json:"instance_count"`
 }
 
 // extractShortName extracts the short name from a full resource name.
@@ -284,6 +284,29 @@ func DeleteExecution(ctx context.Context, project, region, jobName, executionNam
 	_, err = op.Wait(ctx)
 	if err != nil {
 		return fmt.Errorf("failed waiting for deletion of execution %s: %w", executionName, err)
+	}
+	return nil
+}
+
+// DeleteJob deletes a Cloud Run job.
+func DeleteJob(ctx context.Context, project, region, jobName string) error {
+	client, err := GetJobsClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create Cloud Run jobs client: %w", err)
+	}
+
+	name := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", project, region, jobName)
+	apilog.Logf("[CloudRun] Jobs.Delete(%s)", name)
+
+	op, err := client.DeleteJob(ctx, &runpb.DeleteJobRequest{Name: name})
+	if err != nil {
+		return fmt.Errorf("failed to delete job %s: %w", jobName, err)
+	}
+
+	// Wait for the operation to complete.
+	_, err = op.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("failed waiting for deletion of job %s: %w", jobName, err)
 	}
 	return nil
 }

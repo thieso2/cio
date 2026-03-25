@@ -10,12 +10,12 @@ import (
 
 // ServiceAccountInfo represents information about a service account.
 type ServiceAccountInfo struct {
-	Email       string
-	Name        string
-	DisplayName string
-	Description string
-	Disabled    bool
-	ProjectID   string
+	Email       string `json:"email"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Disabled    bool   `json:"disabled"`
+	ProjectID   string `json:"project_id"`
 }
 
 // FormatShort formats service account info in short format (just email).

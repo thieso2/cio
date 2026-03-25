@@ -296,6 +296,11 @@ func IsPubSubPath(path string) bool {
 	return strings.HasPrefix(path, "pubsub://")
 }
 
+// IsCostPath checks if a string is a cost/billing path
+func IsCostPath(path string) bool {
+	return strings.HasPrefix(path, "cost://")
+}
+
 // GetAliasForInput extracts the alias from user input if one was used
 // Returns the alias (without : prefix) and true if an alias was used, empty string and false otherwise
 func (r *Resolver) GetAliasForInput(input string) (string, bool) {

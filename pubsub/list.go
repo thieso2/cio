@@ -13,13 +13,13 @@ import (
 
 // TopicInfo holds information about a Pub/Sub topic.
 type TopicInfo struct {
-	Name            string
-	Project         string
-	SubscriptionCount int
-	Retention       time.Duration
-	Labels          map[string]string
-	KMSKeyName      string
-	SchemaSettings  *pubsub.SchemaSettings
+	Name              string            `json:"name"`
+	Project           string            `json:"project"`
+	SubscriptionCount int               `json:"subscription_count"`
+	Retention         time.Duration     `json:"retention,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	KMSKeyName        string            `json:"kms_key_name,omitempty"`
+	SchemaSettings    *pubsub.SchemaSettings `json:"schema_settings,omitempty"`
 }
 
 // FormatShort returns a short one-line representation.
@@ -44,22 +44,22 @@ func TopicLongHeader() string {
 
 // SubscriptionInfo holds information about a Pub/Sub subscription.
 type SubscriptionInfo struct {
-	Name           string
-	Project        string
-	TopicName      string
-	Type           string // "pull" or "push"
-	AckDeadline    time.Duration
-	Filter         string
-	PushEndpoint   string
-	DeadLetterTopic string
-	MaxDeliveryAttempts int
-	Retention      time.Duration
-	Labels         map[string]string
+	Name                string            `json:"name"`
+	Project             string            `json:"project"`
+	TopicName           string            `json:"topic_name"`
+	Type                string            `json:"type"`
+	AckDeadline         time.Duration     `json:"ack_deadline"`
+	Filter              string            `json:"filter,omitempty"`
+	PushEndpoint        string            `json:"push_endpoint,omitempty"`
+	DeadLetterTopic     string            `json:"dead_letter_topic,omitempty"`
+	MaxDeliveryAttempts int               `json:"max_delivery_attempts,omitempty"`
+	Retention           time.Duration     `json:"retention,omitempty"`
+	Labels              map[string]string `json:"labels,omitempty"`
 
 	// Metrics (populated separately via Cloud Monitoring)
-	Undelivered int64
-	OldestAge   time.Duration
-	HasMetrics  bool
+	Undelivered int64         `json:"undelivered,omitempty"`
+	OldestAge   time.Duration `json:"oldest_age,omitempty"`
+	HasMetrics  bool          `json:"-"`
 }
 
 // FormatShort returns a short one-line representation.

@@ -8,7 +8,8 @@ import (
 
 // Factory creates Resource instances based on path type
 type Factory struct {
-	formatter PathFormatter
+	formatter    PathFormatter
+	BillingTable string // BigQuery billing export table for cost:// paths
 }
 
 // CreateFactory creates a new resource factory
@@ -64,6 +65,10 @@ func (f *Factory) Create(path string) (Resource, error) {
 		return CreateProjectsResource(f.formatter), nil
 	}
 
+	if resolver.IsCostPath(path) {
+		return CreateCostResource(f.formatter, f.BillingTable), nil
+	}
+
 	return nil, fmt.Errorf("unknown resource type for path: %s", path)
 }
 
@@ -92,6 +97,8 @@ func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
 		return CreateCertManagerResource(f.formatter), nil
 	case TypeProjects:
 		return CreateProjectsResource(f.formatter), nil
+	case TypeCost:
+		return CreateCostResource(f.formatter, f.BillingTable), nil
 	default:
 		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
 	}

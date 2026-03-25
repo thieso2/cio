@@ -16,28 +16,28 @@ import (
 
 // BQObjectInfo holds information about a BigQuery object (dataset or table)
 type BQObjectInfo struct {
-	Path        string
-	Type        string // "dataset", "table", "view", "materialized_view", "external", "snapshot"
-	Created     time.Time
-	Modified    time.Time
-	Description string
-	Location    string
-	SizeBytes   int64
-	Schema      bigquery.Schema // Table schema (only for tables)
-	NumRows     int64           // Number of rows (only for tables)
-	ViewQuery   string          // SQL query (only for views)
+	Path        string          `json:"path"`
+	Type        string          `json:"type"`
+	Created     time.Time       `json:"created"`
+	Modified    time.Time       `json:"modified"`
+	Description string          `json:"description,omitempty"`
+	Location    string          `json:"location,omitempty"`
+	SizeBytes   int64           `json:"size_bytes,omitempty"`
+	Schema      bigquery.Schema `json:"-"`
+	NumRows     int64           `json:"num_rows,omitempty"`
+	ViewQuery   string          `json:"view_query,omitempty"`
 
 	// Storage info (from INFORMATION_SCHEMA.TABLE_STORAGE)
-	NumPartitions              int64
-	TotalLogicalBytes          int64
-	ActiveLogicalBytes         int64
-	LongTermLogicalBytes       int64
-	CurrentPhysicalBytes       int64
-	TotalPhysicalBytes         int64
-	ActivePhysicalBytes        int64
-	LongTermPhysicalBytes      int64
-	TimeTravelPhysicalBytes    int64
-	HasStorageInfo             bool // true if storage stats were fetched
+	NumPartitions           int64 `json:"num_partitions,omitempty"`
+	TotalLogicalBytes       int64 `json:"total_logical_bytes,omitempty"`
+	ActiveLogicalBytes      int64 `json:"active_logical_bytes,omitempty"`
+	LongTermLogicalBytes    int64 `json:"long_term_logical_bytes,omitempty"`
+	CurrentPhysicalBytes    int64 `json:"current_physical_bytes,omitempty"`
+	TotalPhysicalBytes      int64 `json:"total_physical_bytes,omitempty"`
+	ActivePhysicalBytes     int64 `json:"active_physical_bytes,omitempty"`
+	LongTermPhysicalBytes   int64 `json:"long_term_physical_bytes,omitempty"`
+	TimeTravelPhysicalBytes int64 `json:"time_travel_physical_bytes,omitempty"`
+	HasStorageInfo          bool  `json:"-"`
 }
 
 // FormatShort formats BigQuery object info in short format

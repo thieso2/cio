@@ -26,12 +26,12 @@ func parseTime(s string) time.Time {
 
 // CertificateInfo holds information about a certificate.
 type CertificateInfo struct {
-	Name       string
-	Domains    []string
-	ExpireTime time.Time
-	State      string
-	Type       string // "managed" or "self-managed"
-	Created    time.Time
+	Name       string    `json:"name"`
+	Domains    []string  `json:"domains,omitempty"`
+	ExpireTime time.Time `json:"expire_time"`
+	State      string    `json:"state"`
+	Type       string    `json:"type"`
+	Created    time.Time `json:"created"`
 }
 
 func (c *CertificateInfo) FormatShort() string { return c.Name }
@@ -54,9 +54,9 @@ func CertificateLongHeader() string {
 
 // CertMapInfo holds information about a certificate map.
 type CertMapInfo struct {
-	Name    string
-	Targets int
-	Created time.Time
+	Name    string    `json:"name"`
+	Targets int       `json:"targets"`
+	Created time.Time `json:"created"`
 }
 
 func (m *CertMapInfo) FormatShort() string { return m.Name }
@@ -72,10 +72,10 @@ func CertMapLongHeader() string {
 
 // CertMapEntryInfo holds information about a certificate map entry.
 type CertMapEntryInfo struct {
-	Name         string
-	Hostname     string
-	State        string
-	Certificates []string
+	Name         string   `json:"name"`
+	Hostname     string   `json:"hostname,omitempty"`
+	State        string   `json:"state"`
+	Certificates []string `json:"certificates,omitempty"`
 }
 
 func (e *CertMapEntryInfo) FormatShort() string { return e.Name }
