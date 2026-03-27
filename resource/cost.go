@@ -82,6 +82,8 @@ const (
 	costByDay
 	costByDayService // daily breakdown by service
 	costByDayOne     // daily for a specific service
+	costBySKU        // SKU-level breakdown (all services)
+	costBySKUForService // SKU-level breakdown for one service
 )
 
 // parsedCostPath holds the parsed components of a cost:// path
@@ -110,12 +112,20 @@ func parseCostPath(path string) parsedCostPath {
 	}
 
 	// Check for special views (parse from the end)
-	// Patterns: daily, daily/services, daily/ServiceName, projects
+	// Patterns: daily, daily/services, daily/ServiceName, projects, skus, skus/ServiceName
 	last := nonEmpty[len(nonEmpty)-1]
 	switch {
 	case last == "projects":
 		p.view = costByProject
 		nonEmpty = nonEmpty[:len(nonEmpty)-1]
+	case last == "skus":
+		p.view = costBySKU
+		nonEmpty = nonEmpty[:len(nonEmpty)-1]
+	case len(nonEmpty) >= 2 && nonEmpty[len(nonEmpty)-2] == "skus":
+		// skus/<ServiceName>
+		p.view = costBySKUForService
+		p.serviceFilter = last
+		nonEmpty = nonEmpty[:len(nonEmpty)-2]
 	case last == "services" && len(nonEmpty) >= 2 && nonEmpty[len(nonEmpty)-2] == "daily":
 		// daily/services
 		p.view = costByDayService
@@ -143,6 +153,7 @@ type CostResource struct {
 	billingTable string
 	labelWidth   int      // dynamically set after listing
 	lastView     costView // set after List() for header formatting
+	lastMonth    string   // YYYYMM format, set after List()
 	subWidths    [3]int   // project, date, service widths for dayService view
 }
 
@@ -150,8 +161,29 @@ func CreateCostResource(formatter PathFormatter, billingTable string) *CostResou
 	return &CostResource{formatter: formatter, billingTable: billingTable}
 }
 
-func (r *CostResource) Type() Type     { return TypeCost }
+func (r *CostResource) Type() Type        { return TypeCost }
 func (r *CostResource) SupportsInfo() bool { return false }
+
+// Period returns the billing period as "YYYY-MM-DD to YYYY-MM-DD".
+// For the current month: first day to today. For past months: first to last day.
+func (r *CostResource) Period() string {
+	if r.lastMonth == "" || len(r.lastMonth) != 6 {
+		return ""
+	}
+	year := r.lastMonth[:4]
+	mon := r.lastMonth[4:]
+	t, err := time.Parse("200601", r.lastMonth)
+	if err != nil {
+		return ""
+	}
+	start := fmt.Sprintf("%s-%s-01", year, mon)
+	now := time.Now()
+	if t.Year() == now.Year() && t.Month() == now.Month() {
+		return fmt.Sprintf("%s to %s", start, now.Format("2006-01-02"))
+	}
+	last := t.AddDate(0, 1, -1)
+	return fmt.Sprintf("%s to %s", start, last.Format("2006-01-02"))
+}
 
 func (r *CostResource) List(ctx context.Context, path string, opts *ListOptions) ([]*ResourceInfo, error) {
 	if r.billingTable == "" {
@@ -181,6 +213,7 @@ func (r *CostResource) List(ctx context.Context, path string, opts *ListOptions)
 	}
 
 	r.lastView = parsed.view
+	r.lastMonth = month
 
 	// For costByDayService, rows have 7 columns (proj, dt, svc, gross, credits, net, currency).
 	// We need to compute max widths for each sub-column, then compose fixed-width labels.
@@ -316,6 +349,21 @@ func (r *CostResource) buildQuery(parsed parsedCostPath, month string) string {
 				`SUM(cost) + SUM(%s) AS net, currency `+
 				`FROM %s %s `+
 				`GROUP BY dt, currency ORDER BY dt`,
+			creditExpr, creditExpr, table, whereClause)
+	case costBySKU:
+		return fmt.Sprintf(
+			`SELECT service.description || ' > ' || sku.description AS label, SUM(cost) AS gross, SUM(%s) AS credits, `+
+				`SUM(cost) + SUM(%s) AS net, currency `+
+				`FROM %s %s `+
+				`GROUP BY label, currency HAVING ABS(gross) > 0.01 ORDER BY gross DESC`,
+			creditExpr, creditExpr, table, whereClause)
+	case costBySKUForService:
+		whereClause += fmt.Sprintf(" AND service.description = '%s'", parsed.serviceFilter)
+		return fmt.Sprintf(
+			`SELECT sku.description, SUM(cost) AS gross, SUM(%s) AS credits, `+
+				`SUM(cost) + SUM(%s) AS net, currency `+
+				`FROM %s %s `+
+				`GROUP BY sku.description, currency HAVING ABS(gross) > 0.01 ORDER BY gross DESC`,
 			creditExpr, creditExpr, table, whereClause)
 	default: // costByService
 		return fmt.Sprintf(

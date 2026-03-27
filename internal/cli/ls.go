@@ -237,6 +237,15 @@ Examples (Pub/Sub):
 			return nil
 		}
 
+		// Cost: print billing period
+		if resolver.IsCostPath(fullPath) {
+			if cr, ok := res.(*resource.CostResource); ok {
+				if p := cr.Period(); p != "" {
+					fmt.Fprintf(os.Stderr, "Period: %s\n", p)
+				}
+			}
+		}
+
 		// Cost always shows a header (even in short format)
 		if resolver.IsCostPath(fullPath) && !lsLongFormat {
 			if cr, ok := res.(*resource.CostResource); ok {
