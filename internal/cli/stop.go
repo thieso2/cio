@@ -91,10 +91,7 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 	}
 
 	for _, projectID := range projectIDs {
-		resourcePath := scheme + "://"
-		if rest != "" {
-			resourcePath += rest
-		}
+		resourcePath := buildDiscoverResourcePath(scheme, projectID, rest)
 
 		switch scheme {
 		case "vm":
@@ -110,7 +107,7 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 			}
 			// Prefix names for display
 			for _, m := range matched {
-				m.Name = projectID + ":" + m.Name
+				m.Name = scheme + ":/" + projectID + "/" + m.Name
 			}
 			if err := resource.StopVMInstances(ctx, projectID, matched, stopForce); err != nil {
 				fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
@@ -127,7 +124,7 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 				continue
 			}
 			for _, m := range matched {
-				m.Name = projectID + ":" + m.Name
+				m.Name = scheme + ":/" + projectID + "/" + m.Name
 			}
 			if err := resource.StopCloudSQLInstances(ctx, projectID, matched, stopForce); err != nil {
 				fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)

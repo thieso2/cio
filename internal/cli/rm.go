@@ -259,24 +259,7 @@ func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) 
 	var allMatches []discoverMatch
 
 	for _, projectID := range projectIDs {
-		var resourcePath string
-		switch scheme {
-		case "bq":
-			resourcePath = "bq://" + projectID
-			if rest != "" {
-				resourcePath += "." + rest
-			}
-		case "iam":
-			resourcePath = "iam://" + projectID
-			if rest != "" {
-				resourcePath += "/" + rest
-			}
-		default:
-			resourcePath = scheme + "://"
-			if rest != "" {
-				resourcePath += rest
-			}
-		}
+		resourcePath := buildDiscoverResourcePath(scheme, projectID, rest)
 
 		res, err := factory.Create(resourcePath)
 		if err != nil {
@@ -309,7 +292,7 @@ func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) 
 	// Show what will be deleted
 	fmt.Printf("Found %d resource(s) to delete:\n", len(allMatches))
 	for _, m := range allMatches {
-		fmt.Printf("  - %s:%s\n", m.projectID, m.info.Name)
+		fmt.Printf("  - %s:/%s/%s\n", scheme, m.projectID, m.info.Name)
 	}
 	fmt.Println()
 
@@ -334,24 +317,7 @@ func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) 
 		if !matchedProjects[projectID] {
 			continue
 		}
-		var resourcePath string
-		switch scheme {
-		case "bq":
-			resourcePath = "bq://" + projectID
-			if rest != "" {
-				resourcePath += "." + rest
-			}
-		case "iam":
-			resourcePath = "iam://" + projectID
-			if rest != "" {
-				resourcePath += "/" + rest
-			}
-		default:
-			resourcePath = scheme + "://"
-			if rest != "" {
-				resourcePath += rest
-			}
-		}
+		resourcePath := buildDiscoverResourcePath(scheme, projectID, rest)
 
 		res, err := factory.Create(resourcePath)
 		if err != nil {

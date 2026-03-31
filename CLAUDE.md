@@ -341,7 +341,7 @@ graph TB
   - VM: `cio stop 'vm://*/bastion-*'`
   - Cloud SQL: `cio stop sql://my-instance`
   - Stops running instances in parallel, skips already-stopped ones
-  - Discover mode: `cio stop 'vm:/iom-*/*/bast*'`
+  - Discover mode: `cio stop 'vm:/iom-*/bast*'`
   - Force flag (`-f`) to skip confirmation
 - **tail.go**: Show/stream logs for Cloud Run, Dataflow, and VM
   - Cloud Run: `cio tail svc://service`, `cio tail -f jobs://job-name`
@@ -926,20 +926,25 @@ cio ls -l 'svc:/iom-*/'
 cio ls -l 'sql:/iom-*/'
 
 # List VMs matching a pattern across projects
-cio ls -l 'vm:/iom-*/*/bast*'
+# VM discover mode: vm:/project-pattern/instance-pattern (zone is implicit — searches all zones)
+cio ls -l 'vm:/iom-*/iomp-ingress*'
+# Also supports explicit zone: vm:/project-pattern/zone/instance-pattern
+cio ls -l 'vm:/iom-*/europe-west3-a/bast*'
 
 # List load balancers across projects
 cio ls -l 'lb:/iom-*/'
 
 # Delete VMs across projects (with confirmation)
-cio rm 'vm:/iom-*/*/staging-*'
+cio rm 'vm:/iom-*/staging-*'
 
 # Stop VMs across projects
-cio stop 'vm:/iom-*/*/bast*'
+cio stop 'vm:/iom-*/bast*'
 
 # Cancel Cloud Run job executions across projects
 cio cancel 'jobs:/iom-*/sqlmesh*/*'
 ```
+
+**Discover mode output format**: resource names are printed as CLI-usable paths (`scheme:/project/name`), so you can copy-paste them directly into commands. For example, `vm:/iom-dev-dirk/iomp-ingress-t3rt`.
 
 ## Future Features (Phase 7+)
 - Web server for file browsing (config: `server.port`, `server.host`, `server.auto_start`)

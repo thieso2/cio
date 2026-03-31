@@ -393,9 +393,10 @@ func sortResources(resources []*resource.ResourceInfo, bySize, byTime bool) {
 	}
 }
 
-// prefixResourceName prefixes the name in both ResourceInfo and its metadata with projectID:.
-func prefixResourceName(info *resource.ResourceInfo, projectID string) {
-	prefix := projectID + ":"
+// prefixResourceName prefixes resource names with a CLI-usable discover-mode path.
+// Output format: scheme:/project/name (e.g., vm:/iom-dev-dirk/iomp-ingress-t3rt).
+func prefixResourceName(info *resource.ResourceInfo, scheme, projectID string) {
+	prefix := scheme + ":/" + projectID + "/"
 	info.Name = prefix + info.Name
 	// Update metadata Name/Email fields so FormatLong uses the prefixed name
 	if info.Metadata != nil {
@@ -464,6 +465,41 @@ func parseDiscoverPath(path string) (string, string, string, bool) {
 	return projectPattern, scheme, rest, true
 }
 
+// buildDiscoverResourcePath constructs a resource path from scheme and rest for discover mode.
+// Handles scheme-specific path formats:
+//   - bq: bq://project-id[.rest]
+//   - iam: iam://project-id[/rest]
+//   - vm: vm://[zone/name] — rest without "/" gets prefixed with "*/" for all-zones
+//   - others: scheme://[rest]
+func buildDiscoverResourcePath(scheme, projectID, rest string) string {
+	switch scheme {
+	case "bq":
+		p := "bq://" + projectID
+		if rest != "" {
+			p += "." + rest
+		}
+		return p
+	case "iam":
+		p := "iam://" + projectID
+		if rest != "" {
+			p += "/" + rest
+		}
+		return p
+	default:
+		p := scheme + "://"
+		if rest != "" {
+			// VM paths need zone/name format; if rest has no slash,
+			// treat it as an instance name pattern across all zones.
+			if scheme == "vm" && !strings.Contains(rest, "/") {
+				p += "*/" + rest
+			} else {
+				p += rest
+			}
+		}
+		return p
+	}
+}
+
 // runDiscoverMode lists resources across multiple projects matching a pattern.
 func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) error {
 	ctx := context.Background()
@@ -491,28 +527,7 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 	headerPrinted := false
 
 	for _, projectID := range projectIDs {
-		// Build the resource path, embedding project ID where the scheme requires it
-		var resourcePath string
-		switch scheme {
-		case "bq":
-			// bq://project-id or bq://project-id.dataset
-			resourcePath = "bq://" + projectID
-			if rest != "" {
-				resourcePath += "." + rest
-			}
-		case "iam":
-			// iam://project-id/resource-type
-			resourcePath = "iam://" + projectID
-			if rest != "" {
-				resourcePath += "/" + rest
-			}
-		default:
-			// Cloud Run, Dataflow, VM, PubSub use opts.ProjectID
-			resourcePath = scheme + "://"
-			if rest != "" {
-				resourcePath += rest
-			}
-		}
+		resourcePath := buildDiscoverResourcePath(scheme, projectID, rest)
 
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Listing %s in project %s\n", resourcePath, projectID)
@@ -572,7 +587,7 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 
 		// Prefix project name to each resource
 		for _, info := range resources {
-			prefixResourceName(info, projectID)
+			prefixResourceName(info, scheme, projectID)
 		}
 
 		if outputJSON {
