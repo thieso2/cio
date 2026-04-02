@@ -82,6 +82,7 @@ const (
 	costByDay
 	costByDayService // daily breakdown by service
 	costByDayOne     // daily for a specific service
+	costByDayProject // daily breakdown by project
 	costBySKU        // SKU-level breakdown (all services)
 	costBySKUForService // SKU-level breakdown for one service
 )
@@ -133,6 +134,10 @@ func parseCostPath(path string) parsedCostPath {
 	case last == "daily":
 		p.view = costByDay
 		nonEmpty = nonEmpty[:len(nonEmpty)-1]
+		// If there's a project wildcard, switch to per-project daily view
+		if len(nonEmpty) > 0 && resolver.HasWildcard(nonEmpty[0]) {
+			p.view = costByDayProject
+		}
 	case len(nonEmpty) >= 2 && nonEmpty[len(nonEmpty)-2] == "daily":
 		// daily/<ServiceName>
 		p.view = costByDayOne
@@ -215,6 +220,11 @@ func (r *CostResource) List(ctx context.Context, path string, opts *ListOptions)
 	r.lastView = parsed.view
 	r.lastMonth = month
 
+	// For costByDayProject, rows have 6 columns (proj, dt, gross, credits, net, currency).
+	if parsed.view == costByDayProject {
+		return r.buildDayProjectResults(result.Rows)
+	}
+
 	// For costByDayService, rows have 7 columns (proj, dt, svc, gross, credits, net, currency).
 	// We need to compute max widths for each sub-column, then compose fixed-width labels.
 	if parsed.view == costByDayService {
@@ -237,6 +247,58 @@ func (r *CostResource) List(ctx context.Context, path string, opts *ListOptions)
 
 	r.labelWidth = CostLabelWidth(resources)
 
+	return resources, nil
+}
+
+// buildDayProjectResults formats 6-column rows (proj, dt, gross, credits, net, currency)
+// with fixed-width sub-columns for aligned output.
+func (r *CostResource) buildDayProjectResults(rows [][]gcpbq.Value) ([]*ResourceInfo, error) {
+	var maxProj int
+	type rawRow struct {
+		proj, dt                 string
+		gross, cred, net         float64
+		currency                 string
+	}
+	var parsed []rawRow
+	for _, row := range rows {
+		if len(row) < 6 {
+			continue
+		}
+		proj, _ := row[0].(string)
+		dt, _ := row[1].(string)
+		if len(proj) > maxProj {
+			maxProj = len(proj)
+		}
+		parsed = append(parsed, rawRow{
+			proj: proj, dt: dt,
+			gross: toFloat64(row[2]), cred: toFloat64(row[3]),
+			net: toFloat64(row[4]), currency: toString(row[5]),
+		})
+	}
+
+	r.subWidths = [3]int{maxProj, 10, 0} // date is always 10 chars, no service column
+
+	var resources []*ResourceInfo
+	for _, rr := range parsed {
+		label := fmt.Sprintf("%-*s  %s", maxProj, rr.proj, rr.dt)
+		info := &CostInfo{
+			Label:    label,
+			Project:  rr.proj,
+			Date:     rr.dt,
+			Cost:     rr.gross,
+			Credits:  rr.cred,
+			NetCost:  rr.net,
+			Currency: rr.currency,
+		}
+		resources = append(resources, &ResourceInfo{
+			Name:     label,
+			Path:     "cost://" + label,
+			Type:     "cost",
+			Metadata: info,
+		})
+	}
+
+	r.labelWidth = CostLabelWidth(resources)
 	return resources, nil
 }
 
@@ -333,6 +395,14 @@ func (r *CostResource) buildQuery(parsed parsedCostPath, month string) string {
 				`SUM(cost) + SUM(%s) AS net, currency `+
 				`FROM %s %s `+
 				`GROUP BY dt, currency ORDER BY dt`,
+			creditExpr, creditExpr, table, whereClause)
+	case costByDayProject:
+		return fmt.Sprintf(
+			`SELECT proj, dt, gross, credits, net, currency FROM (`+
+				`SELECT project.id AS proj, CAST(DATE(usage_start_time) AS STRING) AS dt, `+
+				`SUM(cost) AS gross, SUM(%s) AS credits, SUM(cost) + SUM(%s) AS net, currency `+
+				`FROM %s %s `+
+				`GROUP BY proj, dt, currency) ORDER BY proj, dt`,
 			creditExpr, creditExpr, table, whereClause)
 	case costByDayService:
 		return fmt.Sprintf(
@@ -441,9 +511,15 @@ func (r *CostResource) FormatDetailed(info *ResourceInfo, aliasPath string) stri
 }
 
 func (r *CostResource) FormatHeader() string {
-	if r.lastView == costByDayService && r.subWidths[0] > 0 {
-		label := fmt.Sprintf("%-*s  %-*s  %-*s",
-			r.subWidths[0], "PROJECT", r.subWidths[1], "DATE", r.subWidths[2], "SERVICE")
+	if (r.lastView == costByDayService || r.lastView == costByDayProject) && r.subWidths[0] > 0 {
+		var label string
+		if r.lastView == costByDayProject {
+			label = fmt.Sprintf("%-*s  %-*s",
+				r.subWidths[0], "PROJECT", r.subWidths[1], "DATE")
+		} else {
+			label = fmt.Sprintf("%-*s  %-*s  %-*s",
+				r.subWidths[0], "PROJECT", r.subWidths[1], "DATE", r.subWidths[2], "SERVICE")
+		}
 		w := len(label) + 2
 		return fmt.Sprintf("%-*s %10s", w, label, "COST")
 	}
@@ -451,9 +527,15 @@ func (r *CostResource) FormatHeader() string {
 }
 
 func (r *CostResource) FormatLongHeader() string {
-	if r.lastView == costByDayService && r.subWidths[0] > 0 {
-		label := fmt.Sprintf("%-*s  %-*s  %-*s",
-			r.subWidths[0], "PROJECT", r.subWidths[1], "DATE", r.subWidths[2], "SERVICE")
+	if (r.lastView == costByDayService || r.lastView == costByDayProject) && r.subWidths[0] > 0 {
+		var label string
+		if r.lastView == costByDayProject {
+			label = fmt.Sprintf("%-*s  %-*s",
+				r.subWidths[0], "PROJECT", r.subWidths[1], "DATE")
+		} else {
+			label = fmt.Sprintf("%-*s  %-*s  %-*s",
+				r.subWidths[0], "PROJECT", r.subWidths[1], "DATE", r.subWidths[2], "SERVICE")
+		}
 		w := len(label) + 2
 		return fmt.Sprintf("%-*s %12s %12s %12s", w, label, "GROSS", "CREDITS", "NET COST")
 	}

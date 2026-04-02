@@ -298,7 +298,7 @@ graph TB
   - VM `-l` shows status, machine type, zone, IP, created time
   - Cloud Run jobs: `cio ls -l jobs://` shows status, active/total executions, updated
   - Cloud Run workers: `cio ls -l worker://` shows status, instance count, updated
-  - Cost: `cio ls cost://` by service, `cost://projects`, `cost://daily`, `cost://daily/services`
+  - Cost: `cio ls cost://` by service, `cost://projects`, `cost://daily`, `cost://iom-*/daily` (per-project), `cost://daily/services`
   - `--json` flag outputs all resources as a JSON array
   - `--month YYYY-MM` filter for billing data (default: current month)
   - `--sort=cost|gross|credits` sort for cost output
@@ -613,7 +613,7 @@ cio cp -j 1 --verbose gs://bucket/large.zip /tmp/
 ### Cost/Billing Support - Completed
 - ✅ Cost resource type (`cost://`) querying BigQuery billing export
 - ✅ Config: `billing.table` and `billing.detailed_table` in YAML
-- ✅ Views: by service (default), by project, daily, daily by service, daily for specific service
+- ✅ Views: by service (default), by project, daily, daily by project, daily by service, daily for specific service
 - ✅ Project filtering with wildcards: `cost://iom-*/daily`
 - ✅ Single-slash syntax rewritten to cost:// (no discover mode needed — SQL handles project filtering)
 - ✅ `--month YYYY-MM` flag for historical data
@@ -877,6 +877,9 @@ cio ls -l cost://iom-*/projects
 # Daily cost trend
 cio ls cost://daily
 cio ls cost://my-project/daily
+
+# Daily breakdown by project (wildcard projects show per-project daily rows)
+cio ls -l cost://iom-*/daily
 
 # Daily breakdown by service (with project prefix)
 cio ls -l cost:/iom-pro*/daily/services
