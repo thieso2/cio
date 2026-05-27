@@ -17,9 +17,11 @@ import (
 	"github.com/fatih/color"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
+	auditpb "google.golang.org/genproto/googleapis/cloud/audit"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -488,6 +490,10 @@ func (f *LogFormatter) formatMessage(entry *logging.Entry) string {
 	case *structpb.Struct:
 		// logadmin returns JSON payloads as *structpb.Struct; convert to map first.
 		return f.formatLogMap(v.AsMap())
+	case *anypb.Any:
+		return formatAuditPayload(v)
+	case *auditpb.AuditLog:
+		return formatAuditLog(v)
 	}
 	return fmt.Sprintf("%v", entry.Payload)
 }
@@ -564,6 +570,33 @@ func (f *LogFormatter) formatLogMap(m map[string]interface{}) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// formatAuditLog formats a Cloud Audit Log proto into a concise one-liner.
+func formatAuditLog(al *auditpb.AuditLog) string {
+	method := al.GetMethodName()
+	// Trim "v1.compute." prefix for brevity: "instances.insert" instead of "v1.compute.instances.insert".
+	if after, ok := strings.CutPrefix(method, "v1.compute."); ok {
+		method = after
+	}
+	var parts []string
+	parts = append(parts, method)
+	if auth := al.GetAuthenticationInfo(); auth != nil && auth.GetPrincipalEmail() != "" {
+		parts = append(parts, "caller="+auth.GetPrincipalEmail())
+	}
+	if s := al.GetStatus(); s != nil && s.GetMessage() != "" {
+		parts = append(parts, "error="+s.GetMessage())
+	}
+	return strings.Join(parts, "  ")
+}
+
+// formatAuditPayload handles the *anypb.Any case (fallback when type isn't pre-registered).
+func formatAuditPayload(a *anypb.Any) string {
+	al := &auditpb.AuditLog{}
+	if err := a.UnmarshalTo(al); err != nil {
+		return fmt.Sprintf("[audit] %s", a.GetTypeUrl())
+	}
+	return formatAuditLog(al)
 }
 
 // formatHTTPLogEntry formats a logging.HTTPRequest.

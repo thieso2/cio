@@ -62,6 +62,13 @@ func parseVMPath(p string) (zone, name string) {
 	return
 }
 
+// VMInstanceNameFromPath extracts the instance name from a vm:// path.
+// Used in audit mode where the instance may no longer be running.
+func VMInstanceNameFromPath(p string) string {
+	_, name := parseVMPath(p)
+	return name
+}
+
 // List lists VM zones or instances.
 //
 //	vm://                     → list zones (with instance counts)

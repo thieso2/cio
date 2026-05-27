@@ -98,6 +98,16 @@ See 'cio tail --help' for path format and examples.`,
 func runTail(cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
 
+	// Discover mode: vm:/project/instance → rewrite to vm://*/instance with explicit project.
+	if projectPattern, scheme, rest, ok := parseDiscoverPath(inputPath); ok && scheme == "vm" {
+		// Non-wildcard project: use it directly; wildcard project not supported for tail.
+		if strings.ContainsAny(projectPattern, "*?") {
+			return fmt.Errorf("wildcard project patterns are not supported for 'cio tail'; use a specific project: vm:/project/instance")
+		}
+		vmPath := "vm://*/" + rest
+		return runVMTail(vmPath, projectPattern)
+	}
+
 	// Resolve alias if needed
 	r := resolver.Create(cfg)
 	var err error
@@ -120,7 +130,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	// Dispatch to VM handler if applicable.
 	if resolver.IsVMPath(inputPath) {
-		return runVMTail(inputPath)
+		return runVMTail(inputPath, "")
 	}
 
 	crPath := inputPath
@@ -386,14 +396,17 @@ func runDataflowTail(dfPath string) error {
 }
 
 // runVMTail handles tail/show for VM paths.
-// Supports wildcards — resolves to matching instances, then tails all of them.
+// projectOverride, if non-empty, takes precedence over cfg.Defaults.ProjectID.
 //
 //	vm://zone/instance-name         → Cloud Logging output (single VM)
 //	vm://zone/instance-name/serial  → serial port output (single VM only)
 //	vm://*/pattern*                 → Cloud Logging for matching VMs across all zones
 //	vm://zone/web-*                 → Cloud Logging for matching VMs in zone
-func runVMTail(vmPath string) error {
-	projectID := cfg.Defaults.ProjectID
+func runVMTail(vmPath, projectOverride string) error {
+	projectID := projectOverride
+	if projectID == "" {
+		projectID = cfg.Defaults.ProjectID
+	}
 	if projectID == "" {
 		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 	}
@@ -403,6 +416,17 @@ func runVMTail(vmPath string) error {
 	lookupPath := vmPath
 	if isSerial {
 		lookupPath = strings.TrimSuffix(vmPath, "/serial")
+	}
+
+	// In audit mode, instances may no longer exist — build the filter from the
+	// path name directly without querying the Compute API.
+	if tailAudit {
+		name := resource.VMInstanceNameFromPath(lookupPath)
+		if name == "" {
+			return fmt.Errorf("could not extract instance name from %s", lookupPath)
+		}
+		inst := &compute.InstanceInfo{Name: name}
+		return runVMCloudLogTail(projectID, []*compute.InstanceInfo{inst})
 	}
 
 	// Resolve wildcards to concrete instances
@@ -493,30 +517,47 @@ func runVMSerialTail(projectID, zone, instanceName string) error {
 }
 
 // vmLogFilter builds a Cloud Logging filter for one or more VM instances.
-func vmLogFilter(instances []*compute.InstanceInfo, severity string) string {
+// When audit is true it targets cloudaudit.googleapis.com/activity (lifecycle events).
+func vmLogFilter(instances []*compute.InstanceInfo, severity string, audit bool) string {
 	var parts []string
 	parts = append(parts, `resource.type="gce_instance"`)
 
-	if len(instances) == 1 {
-		inst := instances[0]
-		parts = append(parts, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
-	} else {
-		var nameFilters []string
-		for _, inst := range instances {
-			nameFilters = append(nameFilters, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
+	if audit {
+		// Audit logs use protoPayload.resourceName which contains the instance name.
+		// The logName filter scopes to Admin Activity audit logs.
+		if len(instances) == 1 {
+			inst := instances[0]
+			parts = append(parts, fmt.Sprintf(`protoPayload.resourceName:"instances/%s"`, inst.Name))
+		} else {
+			var nameFilters []string
+			for _, inst := range instances {
+				nameFilters = append(nameFilters, fmt.Sprintf(`protoPayload.resourceName:"instances/%s"`, inst.Name))
+			}
+			parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
 		}
-		parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
-	}
+		parts = append(parts, `logName=~"cloudaudit.googleapis.com%2Factivity"`)
+	} else {
+		if len(instances) == 1 {
+			inst := instances[0]
+			parts = append(parts, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
+		} else {
+			var nameFilters []string
+			for _, inst := range instances {
+				nameFilters = append(nameFilters, fmt.Sprintf(`labels.instance_name="%s"`, inst.Name))
+			}
+			parts = append(parts, "("+strings.Join(nameFilters, " OR ")+")")
+		}
 
-	if severity != "" {
-		parts = append(parts, fmt.Sprintf(`severity>=%s`, strings.ToUpper(severity)))
+		if severity != "" {
+			parts = append(parts, fmt.Sprintf(`severity>=%s`, strings.ToUpper(severity)))
+		}
 	}
 	return strings.Join(parts, " AND ")
 }
 
 // runVMCloudLogTail fetches and optionally streams Cloud Logging entries for VM instances.
 func runVMCloudLogTail(projectID string, instances []*compute.InstanceInfo) error {
-	filter := vmLogFilter(instances, tailSeverity)
+	filter := vmLogFilter(instances, tailSeverity, tailAudit)
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "Filter: %s\n", filter)
@@ -566,13 +607,13 @@ func runVMCloudLogTail(projectID string, instances []*compute.InstanceInfo) erro
 func init() {
 	tailCmd.Flags().BoolVarP(&tailFollow, "follow", "f", false, "stream live logs (follow mode)")
 	tailCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
-	tailCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
+	tailCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (lifecycle events: insert, delete, stop, start)")
 	tailCmd.Flags().StringVarP(&tailSeverity, "severity", "s", "", "minimum severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 	tailCmd.Flags().StringVar(&tailLogType, "log-type", "all", "Dataflow log type: all, job, worker, step")
 	rootCmd.AddCommand(tailCmd)
 
 	showCmd.Flags().IntVarP(&tailNumLines, "lines", "n", 50, "number of lines to show")
-	showCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (job-level events: created, updated, deleted)")
+	showCmd.Flags().BoolVar(&tailAudit, "audit", false, "show Cloud Audit logs (lifecycle events: insert, delete, stop, start)")
 	showCmd.Flags().StringVarP(&tailSeverity, "severity", "s", "", "minimum severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 	showCmd.Flags().StringVar(&tailLogType, "log-type", "all", "Dataflow log type: all, job, worker, step")
 	rootCmd.AddCommand(showCmd)
