@@ -28,12 +28,8 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		return "", fmt.Errorf("alias path cannot be empty")
 	}
 
-	// If already a full path, return as-is
-	if strings.HasPrefix(aliasPath, "gs://") || strings.HasPrefix(aliasPath, "bq://") || strings.HasPrefix(aliasPath, "iam://") ||
-		strings.HasPrefix(aliasPath, "svc://") || strings.HasPrefix(aliasPath, "jobs://") || strings.HasPrefix(aliasPath, "worker://") ||
-		strings.HasPrefix(aliasPath, "dataflow://") || strings.HasPrefix(aliasPath, "vm://") || strings.HasPrefix(aliasPath, "pubsub://") ||
-		strings.HasPrefix(aliasPath, "projects://") || strings.HasPrefix(aliasPath, "sql://") ||
-		strings.HasPrefix(aliasPath, "lb://") || strings.HasPrefix(aliasPath, "certs://") {
+	// If already a full path (any known scheme), return as-is.
+	if IsDirectPath(aliasPath) {
 		return aliasPath, nil
 	}
 
@@ -299,6 +295,17 @@ func IsPubSubPath(path string) bool {
 // IsCostPath checks if a string is a cost/billing path
 func IsCostPath(path string) bool {
 	return strings.HasPrefix(path, "cost://")
+}
+
+// IsDirectPath reports whether path already carries a known resource scheme —
+// i.e. it is a full path, not an alias that needs resolving. This is the single
+// canonical union of every scheme. Commands ask it instead of hand-listing their
+// own subset of IsXPath checks (which had drifted into three divergent lists).
+func IsDirectPath(path string) bool {
+	return IsGCSPath(path) || IsBQPath(path) || IsIAMPath(path) ||
+		IsCloudRunPath(path) || IsDataflowPath(path) || IsVMPath(path) ||
+		IsPubSubPath(path) || IsCloudSQLPath(path) || IsLoadBalancerPath(path) ||
+		IsCertManagerPath(path) || IsProjectsPath(path) || IsCostPath(path)
 }
 
 // GetAliasForInput extracts the alias from user input if one was used

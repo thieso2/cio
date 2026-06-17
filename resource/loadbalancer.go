@@ -122,32 +122,12 @@ func (r *LoadBalancerResource) listBackendServices(ctx context.Context, project,
 	return resources, nil
 }
 
-func (r *LoadBalancerResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeLoadBalancer}, nil
-}
-
 func (r *LoadBalancerResource) FormatShort(info *ResourceInfo, _ string) string {
-	switch v := info.Metadata.(type) {
-	case *loadbalancer.UrlMapInfo:
-		return v.FormatShort()
-	case *loadbalancer.ForwardingRuleInfo:
-		return v.FormatShort()
-	case *loadbalancer.BackendServiceInfo:
-		return v.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *LoadBalancerResource) FormatLong(info *ResourceInfo, _ string) string {
-	switch v := info.Metadata.(type) {
-	case *loadbalancer.UrlMapInfo:
-		return v.FormatLong()
-	case *loadbalancer.ForwardingRuleInfo:
-		return v.FormatLong()
-	case *loadbalancer.BackendServiceInfo:
-		return v.FormatLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *LoadBalancerResource) FormatDetailed(info *ResourceInfo, aliasPath string) string {

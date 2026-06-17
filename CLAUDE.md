@@ -189,7 +189,6 @@ graph TB
 - **Deep core interface** every resource type implements (`Resource`): only the
   universally-supported operations live here, so the interface earns its keep:
   - `List()` - list resources at a path
-  - `ParsePath()` - parse resource paths
   - `FormatShort/Long/Detailed()` / `FormatLongHeader()` - format output
   - `Type()` - resource type
 - **Capability interfaces** for operations only some types support. Callers
@@ -200,6 +199,14 @@ graph TB
   - `Cancelable` - `Cancel()` (Cloud Run job executions)
   - A type appears Removable only if it actually removes — no more `SupportsInfo()`
     guards or stub methods returning "not supported".
+- **`RowFormatter`** (`resource/rowformat.go`): the per-service `*Info` metadata
+  structs implement `FormatShort()/FormatLong()`, so a resource's `FormatShort`/
+  `FormatLong` is just `metaShort(info)`/`metaLong(info)` — no type-switch on
+  `Metadata interface{}`. Adding a metadata type needs no resource change.
+  (GCS/BigQuery/IAM still format with the alias path; cost/projects are columnar.)
+- **No `ParsePath`** on the interface — it was a near-empty method (9 of 12 types
+  stubbed it, one caller). `rm` parses GCS object / BigQuery table leaves inline
+  via `resolver.ParseGCSPath` / `bigquery.ParseBQPath` for its wildcard check.
 - Implementations:
   - `GCSResource` - handles GCS objects and directories
   - `BigQueryResource` - handles BigQuery datasets and tables
@@ -208,7 +215,15 @@ graph TB
   - `DataflowResource` - handles Dataflow jobs
   - `VMResource` - handles Compute Engine VM instances and zones
   - `CostResource` - handles billing cost data via BigQuery export
-- `Factory` - creates appropriate resource handler based on path type
+- `Factory` - creates the resource handler for a path via a **scheme registry**
+  (`resource/factory.go`): an ordered table of `{matchPath, construct}` rows, not a
+  hand-written if/else ladder. Adding a resource type is one row.
+- `resolver.IsDirectPath()` - the single canonical union of every scheme prefix
+  ("is this a full path, not an alias?"). Commands ask it instead of hand-listing
+  their own `IsXPath || ...` subset (which had drifted into three divergent lists).
+- `resolveToResource()` / `resolveInput()` (`internal/cli/input.go`) - the shared
+  command prelude: alias resolution + direct-path detection + factory + handler.
+  `ls`/`rm`/`info` open with one call instead of a copy-pasted ~16-line block.
 - `ResourceInfo` - unified data structure for resource metadata
 - Benefits:
   - Single codebase for all resource types

@@ -8,8 +8,8 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"github.com/thieso2/cio/apilog"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // ServiceInfo holds information about a Cloud Run service.
@@ -423,6 +423,13 @@ func (w *WorkerPoolInfo) FormatWorkerPoolLong() string {
 	updated := w.Updated.Format("2006-01-02 15:04:05")
 	return fmt.Sprintf("%-55s %-12s %10d  %s", w.Name, w.Status, w.InstanceCount, updated)
 }
+
+// FormatLong adapters let each *Info satisfy resource.RowFormatter so the
+// Cloud Run resource can format any of them without type-switching.
+func (s *ServiceInfo) FormatLong() string    { return s.FormatServiceLong() }
+func (j *JobInfo) FormatLong() string        { return j.FormatJobLong() }
+func (e *ExecutionInfo) FormatLong() string  { return e.FormatExecutionLong() }
+func (w *WorkerPoolInfo) FormatLong() string { return w.FormatWorkerPoolLong() }
 
 // ServiceLongHeader returns the header for long service listing.
 func ServiceLongHeader() string {

@@ -31,34 +31,15 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		// Resolve alias to full path if needed
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-		var inputWasAlias bool
-
-		// If it's already a direct path, use it directly
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsPubSubPath(path) || resolver.IsCloudSQLPath(path) {
-			fullPath = path
-			inputWasAlias = false
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
-			inputWasAlias = true
+		// Resolve the input (shared prelude). info builds the factory itself so its
+		// BigQuery-wildcard branch can fan out before creating a single handler.
+		r, fullPath, inputWasAlias, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		ctx := context.Background()
-
-		// Create resource factory with appropriate formatter
-		var formatter resource.PathFormatter
-		if inputWasAlias {
-			formatter = r.ReverseResolve
-		} else {
-			formatter = func(path string) string { return path }
-		}
-		factory := resource.CreateFactory(formatter)
+		factory := newResourceFactory(r, inputWasAlias)
 
 		// Check for wildcard in BigQuery path
 		if resolver.IsBQPath(fullPath) && resolver.HasWildcard(fullPath) {

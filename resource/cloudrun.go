@@ -33,11 +33,6 @@ func CreateCloudRunResource(formatter PathFormatter) *CloudRunResource {
 // Type returns the resource type.
 func (r *CloudRunResource) Type() Type { return TypeCloudRunService }
 
-// ParsePath parses a Cloud Run path into components.
-func (r *CloudRunResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeCloudRunService}, nil
-}
-
 // List lists Cloud Run resources. Project and Region are taken from opts.
 func (r *CloudRunResource) List(ctx context.Context, path string, opts *ListOptions) ([]*ResourceInfo, error) {
 	var project, region string
@@ -503,32 +498,12 @@ func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOpt
 
 // FormatShort formats resource info in short format.
 func (r *CloudRunResource) FormatShort(info *ResourceInfo, aliasPath string) string {
-	switch v := info.Metadata.(type) {
-	case *cloudrun.ServiceInfo:
-		return v.FormatShort()
-	case *cloudrun.JobInfo:
-		return v.FormatShort()
-	case *cloudrun.ExecutionInfo:
-		return v.FormatShort()
-	case *cloudrun.WorkerPoolInfo:
-		return v.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 // FormatLong formats resource info in long format.
 func (r *CloudRunResource) FormatLong(info *ResourceInfo, aliasPath string) string {
-	switch v := info.Metadata.(type) {
-	case *cloudrun.ServiceInfo:
-		return v.FormatServiceLong()
-	case *cloudrun.JobInfo:
-		return v.FormatJobLong()
-	case *cloudrun.ExecutionInfo:
-		return v.FormatExecutionLong()
-	case *cloudrun.WorkerPoolInfo:
-		return v.FormatWorkerPoolLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 // FormatDetailed formats resource info with full details.

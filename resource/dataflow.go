@@ -24,10 +24,6 @@ func CreateDataflowResource(formatter PathFormatter) *DataflowResource {
 func (r *DataflowResource) Type() Type               { return TypeDataflow }
 func (r *DataflowResource) FormatLongHeader() string { return dataflow.JobLongHeader() }
 
-func (r *DataflowResource) ParsePath(p string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeDataflow}, nil
-}
-
 // List lists Dataflow jobs. Supports:
 //   - dataflow://          → list all active jobs
 //   - dataflow://all       → list all jobs (active + terminated)
@@ -97,17 +93,11 @@ func (r *DataflowResource) List(ctx context.Context, p string, opts *ListOptions
 }
 
 func (r *DataflowResource) FormatShort(info *ResourceInfo, _ string) string {
-	if j, ok := info.Metadata.(*dataflow.JobInfo); ok {
-		return j.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *DataflowResource) FormatLong(info *ResourceInfo, _ string) string {
-	if j, ok := info.Metadata.(*dataflow.JobInfo); ok {
-		return j.FormatLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *DataflowResource) FormatDetailed(info *ResourceInfo, aliasPath string) string {

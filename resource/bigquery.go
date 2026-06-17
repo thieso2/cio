@@ -184,21 +184,6 @@ func (b *BigQueryResource) Info(ctx context.Context, path string) (*ResourceInfo
 	}, nil
 }
 
-// ParsePath parses a BigQuery path into components
-func (b *BigQueryResource) ParsePath(path string) (*PathComponents, error) {
-	projectID, datasetID, tableID, err := bigquery.ParseBQPath(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PathComponents{
-		ResourceType: TypeBigQuery,
-		Project:      projectID,
-		Dataset:      datasetID,
-		Table:        tableID,
-	}, nil
-}
-
 // FormatShort formats BigQuery object info in short format
 func (b *BigQueryResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	if obj, ok := info.Details.(*bigquery.BQObjectInfo); ok {

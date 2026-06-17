@@ -31,6 +31,14 @@ type DatabaseInfo struct {
 	Charset string `json:"charset"`
 }
 
+// FormatShort renders a database as a short listing row.
+func (d *DatabaseInfo) FormatShort() string { return d.Name }
+
+// FormatLong renders a database as a long listing row.
+func (d *DatabaseInfo) FormatLong() string {
+	return fmt.Sprintf("%-55s %s", d.Name, d.Charset)
+}
+
 func instanceInfoFrom(inst *sqladmin.DatabaseInstance) *InstanceInfo {
 	info := &InstanceInfo{
 		Name:            inst.Name,

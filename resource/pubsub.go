@@ -25,10 +25,6 @@ func CreatePubSubResource(formatter PathFormatter) *PubSubResource {
 
 func (r *PubSubResource) Type() Type { return TypePubSub }
 
-func (r *PubSubResource) ParsePath(p string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypePubSub}, nil
-}
-
 func (r *PubSubResource) FormatLongHeader() string {
 	switch r.listingMode {
 	case "topics":
@@ -406,23 +402,11 @@ func (r *PubSubResource) removeWithWildcard(ctx context.Context, project, resTyp
 }
 
 func (r *PubSubResource) FormatShort(info *ResourceInfo, _ string) string {
-	switch m := info.Metadata.(type) {
-	case *pubsub.TopicInfo:
-		return m.FormatShort()
-	case *pubsub.SubscriptionInfo:
-		return m.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *PubSubResource) FormatLong(info *ResourceInfo, _ string) string {
-	switch m := info.Metadata.(type) {
-	case *pubsub.TopicInfo:
-		return m.FormatLong()
-	case *pubsub.SubscriptionInfo:
-		return m.FormatLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *PubSubResource) FormatDetailed(info *ResourceInfo, aliasPath string) string {

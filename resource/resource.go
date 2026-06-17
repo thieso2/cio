@@ -56,16 +56,6 @@ type RemoveOptions struct {
 	Region      string // GCP Region (for Cloud Run)
 }
 
-// PathComponents represents parsed path components
-type PathComponents struct {
-	ResourceType Type
-	Project      string // For BigQuery or GCS project
-	Bucket       string // For GCS
-	Object       string // For GCS
-	Dataset      string // For BigQuery
-	Table        string // For BigQuery
-}
-
 // Resource is the deep core every resource type implements: listing and
 // formatting. It is intentionally narrow — every method here is satisfied by
 // all twelve resource types, so the interface earns its keep. Operations that
@@ -78,9 +68,6 @@ type Resource interface {
 
 	// List lists resources at the given path
 	List(ctx context.Context, path string, options *ListOptions) ([]*ResourceInfo, error)
-
-	// ParsePath parses a resource path into components
-	ParsePath(path string) (*PathComponents, error)
 
 	// FormatShort formats resource info in short format
 	FormatShort(info *ResourceInfo, aliasPath string) string

@@ -169,20 +169,6 @@ func (g *GCSResource) Remove(ctx context.Context, path string, options *RemoveOp
 	return storage.RemoveObject(ctx, client, bucket, object, options.Verbose, storageFormatter)
 }
 
-// ParsePath parses a GCS path into components
-func (g *GCSResource) ParsePath(path string) (*PathComponents, error) {
-	bucket, object, err := resolver.ParseGCSPath(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PathComponents{
-		ResourceType: TypeGCS,
-		Bucket:       bucket,
-		Object:       object,
-	}, nil
-}
-
 // FormatShort formats GCS object info in short format
 func (g *GCSResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	// For buckets, show the gs:// path if no alias

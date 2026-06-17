@@ -132,22 +132,10 @@ Examples (Pub/Sub):
 			}
 		}
 
-		// Resolve alias to full path if needed
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-		var inputWasAlias bool
-
-		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsDataflowPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsProjectsPath(path) || resolver.IsCloudSQLPath(path) || resolver.IsLoadBalancerPath(path) || resolver.IsCertManagerPath(path) || resolver.IsCostPath(path) {
-			fullPath = path
-			inputWasAlias = false
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
-			inputWasAlias = true // User provided an alias
+		// Resolve the input and build its resource handler (shared prelude).
+		res, r, fullPath, inputWasAlias, err := resolveToResource(path)
+		if err != nil {
+			return err
 		}
 
 		if verbose {
@@ -155,16 +143,6 @@ Examples (Pub/Sub):
 		}
 
 		ctx := context.Background()
-
-		// Create resource factory
-		factory := resource.CreateFactory(r.ReverseResolve)
-		factory.BillingTable = cfg.Billing.Table
-
-		// Get appropriate resource handler
-		res, err := factory.Create(fullPath)
-		if err != nil {
-			return err
-		}
 
 		// List resources
 		// Convert --month flag to YYYYMM format if provided as YYYY-MM

@@ -102,10 +102,6 @@ func (r *ProjectsResource) List(ctx context.Context, path string, opts *ListOpti
 	return resources, nil
 }
 
-func (r *ProjectsResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeProjects}, nil
-}
-
 func (r *ProjectsResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	if p, ok := info.Metadata.(*ProjectInfo); ok {
 		return p.FormatShort()

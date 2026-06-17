@@ -96,19 +96,6 @@ func (r *IAMResource) Info(ctx context.Context, path string) (*ResourceInfo, err
 	}, nil
 }
 
-// ParsePath parses an IAM path
-func (r *IAMResource) ParsePath(path string) (*PathComponents, error) {
-	projectID, _, err := iam.ParseIAMPath(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PathComponents{
-		ResourceType: TypeIAM,
-		Project:      projectID,
-	}, nil
-}
-
 // FormatShort formats resource info in short format
 func (r *IAMResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	if account, ok := info.Metadata.(*iam.ServiceAccountInfo); ok {

@@ -33,10 +33,6 @@ func (r *VMResource) FormatLongHeader() string {
 	return compute.InstanceLongHeader()
 }
 
-func (r *VMResource) ParsePath(p string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeVM}, nil
-}
-
 // parseVMPath splits vm://[zone][/name] into zone and name.
 //
 // The first segment is always the zone (or * for all zones).
@@ -162,6 +158,16 @@ func (r *VMResource) listZones(ctx context.Context, project string) ([]*Resource
 type zoneInfo struct {
 	Name          string `json:"name"`
 	InstanceCount int    `json:"instance_count"`
+}
+
+// FormatShort renders a zone as a short listing row.
+func (z *zoneInfo) FormatShort() string {
+	return fmt.Sprintf("%s (%d instances)", z.Name, z.InstanceCount)
+}
+
+// FormatLong renders a zone as a long listing row.
+func (z *zoneInfo) FormatLong() string {
+	return fmt.Sprintf("%-30s %d", z.Name, z.InstanceCount)
 }
 
 // MatchVMInstances resolves a vm:// path to matching instances.
@@ -353,23 +359,11 @@ func parallelDelete(ctx context.Context, project string, instances []*compute.In
 }
 
 func (r *VMResource) FormatShort(info *ResourceInfo, _ string) string {
-	if zi, ok := info.Metadata.(*zoneInfo); ok {
-		return fmt.Sprintf("%s (%d instances)", zi.Name, zi.InstanceCount)
-	}
-	if inst, ok := info.Metadata.(*compute.InstanceInfo); ok {
-		return inst.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *VMResource) FormatLong(info *ResourceInfo, _ string) string {
-	if zi, ok := info.Metadata.(*zoneInfo); ok {
-		return fmt.Sprintf("%-30s %d", zi.Name, zi.InstanceCount)
-	}
-	if inst, ok := info.Metadata.(*compute.InstanceInfo); ok {
-		return inst.FormatLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *VMResource) FormatDetailed(info *ResourceInfo, aliasPath string) string {

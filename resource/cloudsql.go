@@ -209,28 +209,12 @@ func (r *CloudSQLResource) InfoWithProject(ctx context.Context, path, project st
 	}, nil
 }
 
-func (r *CloudSQLResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeCloudSQL}, nil
-}
-
 func (r *CloudSQLResource) FormatShort(info *ResourceInfo, _ string) string {
-	if inst, ok := info.Metadata.(*cloudsql.InstanceInfo); ok {
-		return inst.FormatShort()
-	}
-	if db, ok := info.Metadata.(*cloudsql.DatabaseInfo); ok {
-		return db.Name
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *CloudSQLResource) FormatLong(info *ResourceInfo, _ string) string {
-	if inst, ok := info.Metadata.(*cloudsql.InstanceInfo); ok {
-		return inst.FormatLong()
-	}
-	if db, ok := info.Metadata.(*cloudsql.DatabaseInfo); ok {
-		return fmt.Sprintf("%-55s %s", db.Name, db.Charset)
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *CloudSQLResource) FormatDetailed(info *ResourceInfo, _ string) string {

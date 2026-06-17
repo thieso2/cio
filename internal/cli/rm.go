@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/thieso2/cio/bigquery"
 	"github.com/thieso2/cio/resolver"
 	"github.com/thieso2/cio/resource"
 )
@@ -85,42 +86,13 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 			return runDiscoverRemove(cmd, scheme, projectPattern, rest)
 		}
 
-		// Resolve alias
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-		var inputWasAlias bool
-
-		// If it's already a direct path, use it as-is
-		if resolver.IsGCSPath(path) || resolver.IsBQPath(path) || resolver.IsCloudRunPath(path) || resolver.IsVMPath(path) || resolver.IsPubSubPath(path) || resolver.IsCloudSQLPath(path) {
-			fullPath = path
-			inputWasAlias = false
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return fmt.Errorf("failed to resolve path: %w", err)
-			}
-			inputWasAlias = true // User provided an alias
-		}
-
-		ctx := context.Background()
-
-		// Create resource factory with appropriate formatter
-		// Only use reverse resolver if input was an alias
-		var formatter resource.PathFormatter
-		if inputWasAlias {
-			formatter = r.ReverseResolve
-		} else {
-			// Use identity formatter (returns path as-is)
-			formatter = func(path string) string { return path }
-		}
-		factory := resource.CreateFactory(formatter)
-
-		// Get appropriate resource handler
-		res, err := factory.Create(fullPath)
+		// Resolve the input and build its resource handler (shared prelude).
+		res, r, fullPath, inputWasAlias, err := resolveToResource(path)
 		if err != nil {
 			return err
 		}
+
+		ctx := context.Background()
 
 		// Cloud Run, VM, and Pub/Sub handle their own listing/confirmation in Remove
 		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) || resolver.IsCloudSQLPath(fullPath) {
@@ -137,10 +109,16 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 			return rem.Remove(ctx, fullPath, options)
 		}
 
-		// Parse path to check for wildcards
-		components, err := res.ParsePath(fullPath)
-		if err != nil {
-			return err
+		// Only GCS and BigQuery reach here (Cloud Run/VM/Pub/Sub/Cloud SQL returned
+		// above). Pull out the leaf — the GCS object or BigQuery table — that a
+		// wildcard would live in; other schemes have no leaf and stay non-wildcard.
+		isGCS := resolver.IsGCSPath(fullPath)
+		isBQ := resolver.IsBQPath(fullPath)
+		var leaf string
+		if isGCS {
+			_, leaf, _ = resolver.ParseGCSPath(fullPath)
+		} else if isBQ {
+			_, _, leaf, _ = bigquery.ParseBQPath(fullPath)
 		}
 
 		// Only reverse-map if input was an alias
@@ -149,13 +127,7 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 			displayPath = r.ReverseResolve(fullPath)
 		}
 
-		// Check for wildcards and list matching resources first
-		hasWildcard := false
-		if components.ResourceType == resource.TypeGCS {
-			hasWildcard = resolver.HasWildcard(components.Object)
-		} else if components.ResourceType == resource.TypeBigQuery {
-			hasWildcard = resolver.HasWildcard(components.Table)
-		}
+		hasWildcard := (isGCS || isBQ) && resolver.HasWildcard(leaf)
 
 		if hasWildcard {
 			// List matching resources
@@ -171,7 +143,7 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 
 			// Show matching resources
 			resourceWord := "object(s)"
-			if components.ResourceType == resource.TypeBigQuery {
+			if isBQ {
 				resourceWord = "table(s)"
 			}
 
@@ -200,15 +172,14 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 			// For non-wildcard paths, confirm deletion
 			if !rmForce {
 				resourceType := "file"
-				if components.ResourceType == resource.TypeBigQuery {
-					if components.Table != "" {
+				if isBQ {
+					if leaf != "" {
 						resourceType = "table"
 					} else {
 						resourceType = "dataset"
 					}
-				} else if components.ResourceType == resource.TypeGCS {
-					isDirectory := components.Object == "" || components.Object[len(components.Object)-1] == '/'
-					if isDirectory {
+				} else if isGCS {
+					if leaf == "" || leaf[len(leaf)-1] == '/' {
 						resourceType = "directory"
 					}
 				}

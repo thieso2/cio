@@ -132,32 +132,12 @@ func (r *CertManagerResource) listCertMapEntries(ctx context.Context, project, m
 	return resources, nil
 }
 
-func (r *CertManagerResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeCertManager}, nil
-}
-
 func (r *CertManagerResource) FormatShort(info *ResourceInfo, _ string) string {
-	switch v := info.Metadata.(type) {
-	case *certmanager.CertificateInfo:
-		return v.FormatShort()
-	case *certmanager.CertMapInfo:
-		return v.FormatShort()
-	case *certmanager.CertMapEntryInfo:
-		return v.FormatShort()
-	}
-	return info.Name
+	return metaShort(info)
 }
 
 func (r *CertManagerResource) FormatLong(info *ResourceInfo, _ string) string {
-	switch v := info.Metadata.(type) {
-	case *certmanager.CertificateInfo:
-		return v.FormatLong()
-	case *certmanager.CertMapInfo:
-		return v.FormatLong()
-	case *certmanager.CertMapEntryInfo:
-		return v.FormatLong()
-	}
-	return info.Name
+	return metaLong(info)
 }
 
 func (r *CertManagerResource) FormatDetailed(info *ResourceInfo, aliasPath string) string {

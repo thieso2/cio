@@ -19,87 +19,37 @@ func CreateFactory(formatter PathFormatter) *Factory {
 	}
 }
 
-// Create creates the appropriate resource handler for the given path
-func (f *Factory) Create(path string) (Resource, error) {
-	if resolver.IsBQPath(path) {
-		return CreateBigQueryResource(f.formatter), nil
-	}
-
-	if resolver.IsGCSPath(path) {
-		return CreateGCSResource(f.formatter), nil
-	}
-
-	if resolver.IsIAMPath(path) {
-		return CreateIAMResource(f.formatter), nil
-	}
-
-	if resolver.IsCloudRunPath(path) {
-		return CreateCloudRunResource(f.formatter), nil
-	}
-
-	if resolver.IsDataflowPath(path) {
-		return CreateDataflowResource(f.formatter), nil
-	}
-
-	if resolver.IsVMPath(path) {
-		return CreateVMResource(f.formatter), nil
-	}
-
-	if resolver.IsPubSubPath(path) {
-		return CreatePubSubResource(f.formatter), nil
-	}
-
-	if resolver.IsCloudSQLPath(path) {
-		return CreateCloudSQLResource(f.formatter), nil
-	}
-
-	if resolver.IsLoadBalancerPath(path) {
-		return CreateLoadBalancerResource(f.formatter), nil
-	}
-
-	if resolver.IsCertManagerPath(path) {
-		return CreateCertManagerResource(f.formatter), nil
-	}
-
-	if resolver.IsProjectsPath(path) {
-		return CreateProjectsResource(f.formatter), nil
-	}
-
-	if resolver.IsCostPath(path) {
-		return CreateCostResource(f.formatter, f.BillingTable), nil
-	}
-
-	return nil, fmt.Errorf("unknown resource type for path: %s", path)
+// schemeEntry maps a path-scheme predicate to the resource handler that serves
+// it. The registry below is the single source of truth for scheme → handler:
+// adding a resource type is one row, and Create() is a table walk instead of a
+// hand-written if/else ladder. The match predicates live in resolver, so the
+// scheme prefix strings themselves are still owned there.
+type schemeEntry struct {
+	matchPath func(string) bool
+	construct func(f *Factory) Resource
 }
 
-// CreateFromType creates a resource handler for the specified type
-func (f *Factory) CreateFromType(resourceType Type) (Resource, error) {
-	switch resourceType {
-	case TypeGCS:
-		return CreateGCSResource(f.formatter), nil
-	case TypeBigQuery:
-		return CreateBigQueryResource(f.formatter), nil
-	case TypeIAM:
-		return CreateIAMResource(f.formatter), nil
-	case TypeCloudRunService, TypeCloudRunJob, TypeCloudRunWorker:
-		return CreateCloudRunResource(f.formatter), nil
-	case TypeDataflow:
-		return CreateDataflowResource(f.formatter), nil
-	case TypeVM:
-		return CreateVMResource(f.formatter), nil
-	case TypePubSub:
-		return CreatePubSubResource(f.formatter), nil
-	case TypeCloudSQL:
-		return CreateCloudSQLResource(f.formatter), nil
-	case TypeLoadBalancer:
-		return CreateLoadBalancerResource(f.formatter), nil
-	case TypeCertManager:
-		return CreateCertManagerResource(f.formatter), nil
-	case TypeProjects:
-		return CreateProjectsResource(f.formatter), nil
-	case TypeCost:
-		return CreateCostResource(f.formatter, f.BillingTable), nil
-	default:
-		return nil, fmt.Errorf("unknown resource type: %s", resourceType)
+var registry = []schemeEntry{
+	{resolver.IsBQPath, func(f *Factory) Resource { return CreateBigQueryResource(f.formatter) }},
+	{resolver.IsGCSPath, func(f *Factory) Resource { return CreateGCSResource(f.formatter) }},
+	{resolver.IsIAMPath, func(f *Factory) Resource { return CreateIAMResource(f.formatter) }},
+	{resolver.IsCloudRunPath, func(f *Factory) Resource { return CreateCloudRunResource(f.formatter) }},
+	{resolver.IsDataflowPath, func(f *Factory) Resource { return CreateDataflowResource(f.formatter) }},
+	{resolver.IsVMPath, func(f *Factory) Resource { return CreateVMResource(f.formatter) }},
+	{resolver.IsPubSubPath, func(f *Factory) Resource { return CreatePubSubResource(f.formatter) }},
+	{resolver.IsCloudSQLPath, func(f *Factory) Resource { return CreateCloudSQLResource(f.formatter) }},
+	{resolver.IsLoadBalancerPath, func(f *Factory) Resource { return CreateLoadBalancerResource(f.formatter) }},
+	{resolver.IsCertManagerPath, func(f *Factory) Resource { return CreateCertManagerResource(f.formatter) }},
+	{resolver.IsProjectsPath, func(f *Factory) Resource { return CreateProjectsResource(f.formatter) }},
+	{resolver.IsCostPath, func(f *Factory) Resource { return CreateCostResource(f.formatter, f.BillingTable) }},
+}
+
+// Create creates the appropriate resource handler for the given path
+func (f *Factory) Create(path string) (Resource, error) {
+	for _, e := range registry {
+		if e.matchPath(path) {
+			return e.construct(f), nil
+		}
 	}
+	return nil, fmt.Errorf("unknown resource type for path: %s", path)
 }

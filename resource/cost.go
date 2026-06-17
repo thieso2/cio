@@ -479,10 +479,6 @@ func toFloat64(v interface{}) float64 {
 	}
 }
 
-func (r *CostResource) ParsePath(path string) (*PathComponents, error) {
-	return &PathComponents{ResourceType: TypeCost}, nil
-}
-
 func (r *CostResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	if c, ok := info.Metadata.(*CostInfo); ok {
 		return c.FormatShortW(r.labelWidth)
