@@ -2,34 +2,26 @@ package storage
 
 import (
 	"context"
-	"sync"
 
 	"cloud.google.com/go/storage"
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 )
 
-var (
-	// Singleton instance
-	once      sync.Once
-	gcsClient *storage.Client
-	clientErr error
-)
+// provider holds the singleton GCS client.
+var provider gclient.Provider[*storage.Client]
 
 // GetClient returns a singleton GCS client instance
 // The client is created once and reused for all operations
 // Authentication uses Application Default Credentials (ADC)
 func GetClient(ctx context.Context) (*storage.Client, error) {
-	once.Do(func() {
+	return provider.Get(ctx, func(ctx context.Context) (*storage.Client, error) {
 		apilog.Logf("[GCS] NewClient()")
-		gcsClient, clientErr = storage.NewClient(ctx)
+		return storage.NewClient(ctx)
 	})
-	return gcsClient, clientErr
 }
 
 // Close closes the GCS client if it was initialized
 func Close() error {
-	if gcsClient != nil {
-		return gcsClient.Close()
-	}
-	return nil
+	return provider.Close(func(c *storage.Client) error { return c.Close() })
 }

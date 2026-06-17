@@ -66,19 +66,18 @@ type PathComponents struct {
 	Table        string // For BigQuery
 }
 
-// Resource defines the interface for all resource types
+// Resource is the deep core every resource type implements: listing and
+// formatting. It is intentionally narrow — every method here is satisfied by
+// all twelve resource types, so the interface earns its keep. Operations that
+// only some types support (remove, info, cancel) live in the capability
+// interfaces below, which callers type-assert to. That keeps the promise honest:
+// a type appears Removable only if it actually removes.
 type Resource interface {
 	// Type returns the resource type
 	Type() Type
 
 	// List lists resources at the given path
 	List(ctx context.Context, path string, options *ListOptions) ([]*ResourceInfo, error)
-
-	// Remove removes resource(s) at the given path
-	Remove(ctx context.Context, path string, options *RemoveOptions) error
-
-	// Info gets detailed information about a specific resource
-	Info(ctx context.Context, path string) (*ResourceInfo, error)
 
 	// ParsePath parses a resource path into components
 	ParsePath(path string) (*PathComponents, error)
@@ -94,9 +93,29 @@ type Resource interface {
 
 	// FormatLongHeader returns the header line for long format (empty string if no header needed)
 	FormatLongHeader() string
+}
 
-	// SupportsInfo returns whether this resource type supports detailed info
-	SupportsInfo() bool
+// Removable is implemented by resource types that support deletion via `cio rm`.
+type Removable interface {
+	Remove(ctx context.Context, path string, options *RemoveOptions) error
+}
+
+// Infoable is implemented by resource types that support `cio info` (detailed
+// single-resource view) without needing an explicit project id.
+type Infoable interface {
+	Info(ctx context.Context, path string) (*ResourceInfo, error)
+}
+
+// ProjectInfoable is implemented by resource types whose detailed info needs an
+// explicit project id (Pub/Sub, Cloud SQL). Callers prefer this over Infoable.
+type ProjectInfoable interface {
+	InfoWithProject(ctx context.Context, path, project string) (*ResourceInfo, error)
+}
+
+// Cancelable is implemented by resource types that support cancellation
+// (currently Cloud Run job executions via `cio cancel`).
+type Cancelable interface {
+	Cancel(ctx context.Context, path string, options *RemoveOptions) error
 }
 
 // PathFormatter is a function that converts full paths to alias format

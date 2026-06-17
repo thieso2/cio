@@ -169,11 +169,6 @@ func (g *GCSResource) Remove(ctx context.Context, path string, options *RemoveOp
 	return storage.RemoveObject(ctx, client, bucket, object, options.Verbose, storageFormatter)
 }
 
-// Info gets detailed information about a GCS object
-func (g *GCSResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("info command not supported for GCS objects (use 'ls -l' instead)")
-}
-
 // ParsePath parses a GCS path into components
 func (g *GCSResource) ParsePath(path string) (*PathComponents, error) {
 	bucket, object, err := resolver.ParseGCSPath(path)
@@ -220,9 +215,4 @@ func (g *GCSResource) FormatDetailed(info *ResourceInfo, aliasPath string) strin
 func (g *GCSResource) FormatLongHeader() string {
 	// GCS doesn't use a header for now
 	return ""
-}
-
-// SupportsInfo returns whether GCS supports the info command
-func (g *GCSResource) SupportsInfo() bool {
-	return false
 }

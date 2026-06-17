@@ -2,30 +2,24 @@ package compute
 
 import (
 	"context"
-	"sync"
 
 	computeapi "cloud.google.com/go/compute/apiv1"
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 )
 
-var (
-	instancesOnce   sync.Once
-	instancesClient *computeapi.InstancesClient
-	instancesErr    error
-)
+// instances holds the singleton Compute Engine InstancesClient.
+var instances gclient.Provider[*computeapi.InstancesClient]
 
 // GetInstancesClient returns the singleton Compute Engine InstancesClient.
 func GetInstancesClient(ctx context.Context) (*computeapi.InstancesClient, error) {
-	instancesOnce.Do(func() {
+	return instances.Get(ctx, func(ctx context.Context) (*computeapi.InstancesClient, error) {
 		apilog.Logf("[Compute] NewInstancesRESTClient()")
-		instancesClient, instancesErr = computeapi.NewInstancesRESTClient(ctx)
+		return computeapi.NewInstancesRESTClient(ctx)
 	})
-	return instancesClient, instancesErr
 }
 
 // Close closes all Compute Engine clients.
 func Close() {
-	if instancesClient != nil {
-		instancesClient.Close()
-	}
+	_ = instances.Close(func(c *computeapi.InstancesClient) error { return c.Close() })
 }

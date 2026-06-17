@@ -20,8 +20,7 @@ func CreateCertManagerResource(formatter PathFormatter) *CertManagerResource {
 	return &CertManagerResource{formatter: formatter}
 }
 
-func (r *CertManagerResource) Type() Type        { return TypeCertManager }
-func (r *CertManagerResource) SupportsInfo() bool { return false }
+func (r *CertManagerResource) Type() Type { return TypeCertManager }
 
 // parseCertsPath parses certs://[sub/path]
 // certs://           → subType="", name=""
@@ -131,14 +130,6 @@ func (r *CertManagerResource) listCertMapEntries(ctx context.Context, project, m
 		})
 	}
 	return resources, nil
-}
-
-func (r *CertManagerResource) Remove(ctx context.Context, path string, opts *RemoveOptions) error {
-	return fmt.Errorf("removing certificate resources is not supported via cio")
-}
-
-func (r *CertManagerResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("use 'cio ls -l certs://' for certificate details")
 }
 
 func (r *CertManagerResource) ParsePath(path string) (*PathComponents, error) {

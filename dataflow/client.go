@@ -3,25 +3,21 @@ package dataflow
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
+	"github.com/thieso2/cio/gclient"
 	df "google.golang.org/api/dataflow/v1b3"
 	"google.golang.org/api/option"
 )
 
-var (
-	svc     *df.Service
-	svcOnce sync.Once
-	svcErr  error
-)
+// provider holds the singleton Dataflow API service.
+var provider gclient.Provider[*df.Service]
 
 // getService returns the singleton Dataflow API service.
 func getService(ctx context.Context) (*df.Service, error) {
-	svcOnce.Do(func() {
-		svc, svcErr = df.NewService(ctx, option.WithScopes(df.CloudPlatformScope))
+	return provider.Get(ctx, func(ctx context.Context) (*df.Service, error) {
+		return df.NewService(ctx, option.WithScopes(df.CloudPlatformScope))
 	})
-	return svc, svcErr
 }
 
 // JobInfo holds summary information about a Dataflow job.

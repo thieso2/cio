@@ -2,47 +2,37 @@ package pubsub
 
 import (
 	"context"
-	"sync"
 
-	"cloud.google.com/go/pubsub"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
+	"cloud.google.com/go/pubsub"
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 )
 
+// Singleton providers for the Pub/Sub and Monitoring clients.
 var (
-	clientOnce sync.Once
-	psClient   *pubsub.Client
-	psErr      error
-
-	monOnce   sync.Once
-	monClient *monitoring.MetricClient
-	monErr    error
+	pubsubClient gclient.Provider[*pubsub.Client]
+	monClient    gclient.Provider[*monitoring.MetricClient]
 )
 
 // GetClient returns the singleton Pub/Sub client for the given project.
 func GetClient(ctx context.Context, projectID string) (*pubsub.Client, error) {
-	clientOnce.Do(func() {
+	return pubsubClient.Get(ctx, func(ctx context.Context) (*pubsub.Client, error) {
 		apilog.Logf("[PubSub] NewClient(project=%s)", projectID)
-		psClient, psErr = pubsub.NewClient(ctx, projectID)
+		return pubsub.NewClient(ctx, projectID)
 	})
-	return psClient, psErr
 }
 
 // GetMonitoringClient returns the singleton Cloud Monitoring MetricClient.
 func GetMonitoringClient(ctx context.Context) (*monitoring.MetricClient, error) {
-	monOnce.Do(func() {
+	return monClient.Get(ctx, func(ctx context.Context) (*monitoring.MetricClient, error) {
 		apilog.Logf("[PubSub] monitoring.NewMetricClient()")
-		monClient, monErr = monitoring.NewMetricClient(ctx)
+		return monitoring.NewMetricClient(ctx)
 	})
-	return monClient, monErr
 }
 
 // Close closes all Pub/Sub clients.
 func Close() {
-	if psClient != nil {
-		psClient.Close()
-	}
-	if monClient != nil {
-		monClient.Close()
-	}
+	_ = pubsubClient.Close(func(c *pubsub.Client) error { return c.Close() })
+	_ = monClient.Close(func(c *monitoring.MetricClient) error { return c.Close() })
 }

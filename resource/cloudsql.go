@@ -24,8 +24,6 @@ func CreateCloudSQLResource(formatter PathFormatter) *CloudSQLResource {
 
 func (r *CloudSQLResource) Type() Type { return TypeCloudSQL }
 
-func (r *CloudSQLResource) SupportsInfo() bool { return true }
-
 // parseCloudSQLPath parses sql://name or sql://name/databases
 func parseCloudSQLPath(path string) (name, sub string) {
 	rest := strings.TrimPrefix(path, "sql://")
@@ -188,10 +186,6 @@ func (r *CloudSQLResource) removeMatching(ctx context.Context, project, pattern 
 	}
 	wg.Wait()
 	return firstErr
-}
-
-func (r *CloudSQLResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("use InfoWithProject for Cloud SQL")
 }
 
 // InfoWithProject returns detailed info about a Cloud SQL instance.

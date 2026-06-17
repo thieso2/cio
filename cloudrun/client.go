@@ -2,78 +2,56 @@ package cloudrun
 
 import (
 	"context"
-	"sync"
 
 	run "cloud.google.com/go/run/apiv2"
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 )
 
+// Singleton providers for each Cloud Run v2 client.
 var (
-	servicesOnce   sync.Once
-	servicesClient *run.ServicesClient
-	servicesErr    error
-
-	jobsOnce   sync.Once
-	jobsClient *run.JobsClient
-	jobsErr    error
-
-	executionsOnce   sync.Once
-	executionsClient *run.ExecutionsClient
-	executionsErr    error
-
-	workerPoolsOnce   sync.Once
-	workerPoolsClient *run.WorkerPoolsClient
-	workerPoolsErr    error
+	services    gclient.Provider[*run.ServicesClient]
+	jobs        gclient.Provider[*run.JobsClient]
+	executions  gclient.Provider[*run.ExecutionsClient]
+	workerPools gclient.Provider[*run.WorkerPoolsClient]
 )
 
 // GetServicesClient returns the singleton Cloud Run v2 ServicesClient.
 func GetServicesClient(ctx context.Context) (*run.ServicesClient, error) {
-	servicesOnce.Do(func() {
+	return services.Get(ctx, func(ctx context.Context) (*run.ServicesClient, error) {
 		apilog.Logf("[CloudRun] NewServicesClient()")
-		servicesClient, servicesErr = run.NewServicesClient(ctx)
+		return run.NewServicesClient(ctx)
 	})
-	return servicesClient, servicesErr
 }
 
 // GetJobsClient returns the singleton Cloud Run v2 JobsClient.
 func GetJobsClient(ctx context.Context) (*run.JobsClient, error) {
-	jobsOnce.Do(func() {
+	return jobs.Get(ctx, func(ctx context.Context) (*run.JobsClient, error) {
 		apilog.Logf("[CloudRun] NewJobsClient()")
-		jobsClient, jobsErr = run.NewJobsClient(ctx)
+		return run.NewJobsClient(ctx)
 	})
-	return jobsClient, jobsErr
 }
 
 // GetExecutionsClient returns the singleton Cloud Run v2 ExecutionsClient.
 func GetExecutionsClient(ctx context.Context) (*run.ExecutionsClient, error) {
-	executionsOnce.Do(func() {
+	return executions.Get(ctx, func(ctx context.Context) (*run.ExecutionsClient, error) {
 		apilog.Logf("[CloudRun] NewExecutionsClient()")
-		executionsClient, executionsErr = run.NewExecutionsClient(ctx)
+		return run.NewExecutionsClient(ctx)
 	})
-	return executionsClient, executionsErr
 }
 
 // GetWorkerPoolsClient returns the singleton Cloud Run v2 WorkerPoolsClient.
 func GetWorkerPoolsClient(ctx context.Context) (*run.WorkerPoolsClient, error) {
-	workerPoolsOnce.Do(func() {
+	return workerPools.Get(ctx, func(ctx context.Context) (*run.WorkerPoolsClient, error) {
 		apilog.Logf("[CloudRun] NewWorkerPoolsClient()")
-		workerPoolsClient, workerPoolsErr = run.NewWorkerPoolsClient(ctx)
+		return run.NewWorkerPoolsClient(ctx)
 	})
-	return workerPoolsClient, workerPoolsErr
 }
 
 // Close closes all Cloud Run clients.
 func Close() {
-	if servicesClient != nil {
-		servicesClient.Close()
-	}
-	if jobsClient != nil {
-		jobsClient.Close()
-	}
-	if executionsClient != nil {
-		executionsClient.Close()
-	}
-	if workerPoolsClient != nil {
-		workerPoolsClient.Close()
-	}
+	_ = services.Close(func(c *run.ServicesClient) error { return c.Close() })
+	_ = jobs.Close(func(c *run.JobsClient) error { return c.Close() })
+	_ = executions.Close(func(c *run.ExecutionsClient) error { return c.Close() })
+	_ = workerPools.Close(func(c *run.WorkerPoolsClient) error { return c.Close() })
 }

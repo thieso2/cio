@@ -81,18 +81,7 @@ Examples:
 func runDiscoverStop(scheme, projectPattern, rest string) error {
 	ctx := context.Background()
 
-	projectIDs, err := resource.ListProjectIDs(ctx, projectPattern)
-	if err != nil {
-		return err
-	}
-	if len(projectIDs) == 0 {
-		fmt.Printf("No projects matching %s\n", projectPattern)
-		return nil
-	}
-
-	for _, projectID := range projectIDs {
-		resourcePath := buildDiscoverResourcePath(scheme, projectID, rest)
-
+	return forEachDiscoveredProject(ctx, scheme, projectPattern, rest, func(projectID, resourcePath string) error {
 		switch scheme {
 		case "vm":
 			matched, err := resource.MatchVMInstances(ctx, resourcePath, projectID)
@@ -100,10 +89,10 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
 				}
-				continue
+				return nil
 			}
 			if len(matched) == 0 {
-				continue
+				return nil
 			}
 			// Prefix names for display
 			for _, m := range matched {
@@ -118,10 +107,10 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
 				}
-				continue
+				return nil
 			}
 			if len(matched) == 0 {
-				continue
+				return nil
 			}
 			for _, m := range matched {
 				m.Name = scheme + ":/" + projectID + "/" + m.Name
@@ -132,8 +121,8 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 		default:
 			return fmt.Errorf("stop discover mode not supported for %s://", scheme)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func init() {

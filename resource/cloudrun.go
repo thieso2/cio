@@ -33,9 +33,6 @@ func CreateCloudRunResource(formatter PathFormatter) *CloudRunResource {
 // Type returns the resource type.
 func (r *CloudRunResource) Type() Type { return TypeCloudRunService }
 
-// SupportsInfo returns whether this resource type supports detailed info.
-func (r *CloudRunResource) SupportsInfo() bool { return false }
-
 // ParsePath parses a Cloud Run path into components.
 func (r *CloudRunResource) ParsePath(path string) (*PathComponents, error) {
 	return &PathComponents{ResourceType: TypeCloudRunService}, nil
@@ -504,11 +501,6 @@ func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOpt
 	return firstErr
 }
 
-// Info returns detailed information about a Cloud Run resource.
-func (r *CloudRunResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("cio info is not yet supported for Cloud Run resources")
-}
-
 // FormatShort formats resource info in short format.
 func (r *CloudRunResource) FormatShort(info *ResourceInfo, aliasPath string) string {
 	switch v := info.Metadata.(type) {
@@ -580,4 +572,3 @@ func FormatLongHeaderDynamic(resources []*ResourceInfo) string {
 	}
 	return ""
 }
-

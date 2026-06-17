@@ -71,27 +71,21 @@ Examples:
 			return err
 		}
 
-		// Check if this resource type supports info
-		if !res.SupportsInfo() {
-			return fmt.Errorf("info command not supported for %s resources (use 'ls -l' instead)", res.Type())
-		}
-
-		// Some resources need project ID passed explicitly
+		// Dispatch by capability: resources whose info needs an explicit project
+		// (Pub/Sub, Cloud SQL) implement ProjectInfoable; the rest implement
+		// Infoable. A type that does neither doesn't support `cio info`.
 		var info *resource.ResourceInfo
-		if psRes, ok := res.(*resource.PubSubResource); ok {
+		switch ir := res.(type) {
+		case resource.ProjectInfoable:
 			projectID := cfg.Defaults.ProjectID
 			if projectID == "" {
 				return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 			}
-			info, err = psRes.InfoWithProject(ctx, fullPath, projectID)
-		} else if sqlRes, ok := res.(*resource.CloudSQLResource); ok {
-			projectID := cfg.Defaults.ProjectID
-			if projectID == "" {
-				return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
-			}
-			info, err = sqlRes.InfoWithProject(ctx, fullPath, projectID)
-		} else {
-			info, err = res.Info(ctx, fullPath)
+			info, err = ir.InfoWithProject(ctx, fullPath, projectID)
+		case resource.Infoable:
+			info, err = ir.Info(ctx, fullPath)
+		default:
+			return fmt.Errorf("info command not supported for %s resources (use 'ls -l' instead)", res.Type())
 		}
 		if err != nil {
 			return fmt.Errorf("failed to get resource info: %w", err)

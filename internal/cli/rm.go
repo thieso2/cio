@@ -130,7 +130,11 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 				Project: cfg.Defaults.ProjectID,
 				Region:  cfg.Defaults.Region,
 			}
-			return res.Remove(ctx, fullPath, options)
+			rem, ok := res.(resource.Removable)
+			if !ok {
+				return fmt.Errorf("rm is not supported for %s resources", res.Type())
+			}
+			return rem.Remove(ctx, fullPath, options)
 		}
 
 		// Parse path to check for wildcards
@@ -227,7 +231,11 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 			Parallelism: GetParallelism(),
 		}
 
-		return res.Remove(ctx, fullPath, options)
+		rem, ok := res.(resource.Removable)
+		if !ok {
+			return fmt.Errorf("rm is not supported for %s resources", res.Type())
+		}
+		return rem.Remove(ctx, fullPath, options)
 	},
 }
 
@@ -235,17 +243,14 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) error {
 	ctx := context.Background()
 
-	projectIDs, err := resource.ListProjectIDs(ctx, projectPattern)
+	// discoverProjects handles the empty-result notice and verbose discovery log.
+	// rm needs the full list up front for its collect → confirm → delete passes.
+	projectIDs, err := discoverProjects(ctx, projectPattern)
 	if err != nil {
 		return err
 	}
 	if len(projectIDs) == 0 {
-		fmt.Fprintf(os.Stderr, "No projects matching %s\n", projectPattern)
 		return nil
-	}
-
-	if verbose {
-		fmt.Fprintf(os.Stderr, "Discover: %d projects matching %s\n", len(projectIDs), projectPattern)
 	}
 
 	r := resolver.Create(cfg)
@@ -331,7 +336,12 @@ func runDiscoverRemove(cmd *cobra.Command, scheme, projectPattern, rest string) 
 			Region:  cfg.Defaults.Region,
 		}
 
-		if err := res.Remove(ctx, resourcePath, options); err != nil {
+		rem, ok := res.(resource.Removable)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Error in %s: rm not supported for %s\n", projectID, res.Type())
+			continue
+		}
+		if err := rem.Remove(ctx, resourcePath, options); err != nil {
 			fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
 		}
 	}

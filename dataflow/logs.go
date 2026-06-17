@@ -5,20 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/logging"
-	"cloud.google.com/go/logging/logadmin"
-	logpb "cloud.google.com/go/logging/apiv2/loggingpb"
 	"github.com/fatih/color"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/iterator"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/oauth"
-	"google.golang.org/protobuf/types/known/durationpb"
+	"github.com/thieso2/cio/internal/logtail"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -90,171 +82,49 @@ func LogFilters(projectID, jobID string, logType LogType, severity string) map[L
 	}
 }
 
+// orderedFilters returns the filters and a parallel slice of their log types, in
+// a stable order, for the given selection. The slice index is what logtail tags
+// each entry with so we can recover the LogType.
+func orderedFilters(projectID, jobID string, logType LogType, severity string) ([]string, []LogType) {
+	if logType != LogTypeAll {
+		return []string{logFilter(projectID, jobID, logType, severity)}, []LogType{logType}
+	}
+	types := []LogType{LogTypeJob, LogTypeWorker, LogTypeStep}
+	filters := make([]string, len(types))
+	for i, lt := range types {
+		filters[i] = logFilter(projectID, jobID, lt, severity)
+	}
+	return filters, types
+}
+
 // taggedEntry wraps a logging.Entry with its source log type.
 type taggedEntry struct {
 	Entry   *logging.Entry
 	LogType LogType
 }
 
-// FetchLogs fetches the last n log entries for a Dataflow job.
-// Returns entries tagged with their log type.
+// FetchLogs fetches the last n log entries for a Dataflow job, tagged with their
+// log type. Delegates the logadmin work to logtail.Fetch.
 func FetchLogs(ctx context.Context, projectID, jobID string, logType LogType, severity string, n int) ([]taggedEntry, error) {
-	filters := LogFilters(projectID, jobID, logType, severity)
-
-	client, err := logadmin.NewClient(ctx, projectID)
+	filters, types := orderedFilters(projectID, jobID, logType, severity)
+	tagged, err := logtail.Fetch(ctx, projectID, filters, n)
 	if err != nil {
-		return nil, fmt.Errorf("creating logging client: %w", err)
+		return nil, err
 	}
-	defer client.Close()
-
-	var all []taggedEntry
-	for lt, filter := range filters {
-		it := client.Entries(ctx,
-			logadmin.Filter(filter),
-			logadmin.NewestFirst(),
-		)
-		var entries []taggedEntry
-		for len(entries) < n {
-			entry, err := it.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				return nil, fmt.Errorf("fetching %s log entries: %w", lt, err)
-			}
-			entries = append(entries, taggedEntry{Entry: entry, LogType: lt})
-		}
-		all = append(all, entries...)
+	out := make([]taggedEntry, len(tagged))
+	for i, t := range tagged {
+		out[i] = taggedEntry{Entry: t.Entry, LogType: types[t.Filter]}
 	}
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].Entry.Timestamp.Before(all[j].Entry.Timestamp)
-	})
-	return all, nil
+	return out, nil
 }
 
-// StreamLogs streams live Dataflow log entries to stdout using gRPC TailLogEntries.
+// StreamLogs streams live Dataflow log entries, tagging each by its source
+// filter's log type. Delegates the gRPC tailing to logtail.Stream.
 func StreamLogs(ctx context.Context, projectID, jobID string, logType LogType, severity string, f *LogFormatter) error {
-	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/logging.read")
-	if err != nil {
-		return fmt.Errorf("getting credentials: %w", err)
-	}
-
-	perRPCCreds := oauth.TokenSource{TokenSource: tokenSource}
-	conn, err := grpc.NewClient(
-		"logging.googleapis.com:443",
-		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, "")),
-		grpc.WithPerRPCCredentials(perRPCCreds),
-	)
-	if err != nil {
-		return fmt.Errorf("creating gRPC connection: %w", err)
-	}
-	defer conn.Close()
-
-	client := logpb.NewLoggingServiceV2Client(conn)
-	filters := LogFilters(projectID, jobID, logType, severity)
-
-	// For "all" mode, we open one stream per log type to tag entries correctly.
-	// For single type, just one stream.
-	type streamInfo struct {
-		stream  logpb.LoggingServiceV2_TailLogEntriesClient
-		req     *logpb.TailLogEntriesRequest
-		logType LogType
-	}
-
-	var streams []streamInfo
-	for lt, filter := range filters {
-		stream, err := client.TailLogEntries(ctx)
-		if err != nil {
-			return fmt.Errorf("creating tail stream for %s: %w", lt, err)
-		}
-		req := &logpb.TailLogEntriesRequest{
-			ResourceNames: []string{fmt.Sprintf("projects/%s", projectID)},
-			Filter:        filter,
-			BufferWindow:  durationpb.New(2 * time.Second),
-		}
-		if err := stream.Send(req); err != nil {
-			return fmt.Errorf("sending tail request for %s: %w", lt, err)
-		}
-		streams = append(streams, streamInfo{stream: stream, req: req, logType: lt})
-	}
-
-	fmt.Fprintf(os.Stderr, "Streaming logs... (Ctrl+C to stop)\n")
-
-	// For single stream, just read from it directly.
-	if len(streams) == 1 {
-		s := streams[0]
-		const maxRetries = 2
-		for {
-			resp, err := s.stream.Recv()
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				reconnected := false
-				for attempt := 1; attempt <= maxRetries; attempt++ {
-					time.Sleep(time.Duration(attempt) * time.Second)
-					if ctx.Err() != nil {
-						return nil
-					}
-					newStream, sendErr := client.TailLogEntries(ctx)
-					if sendErr != nil {
-						continue
-					}
-					if sendErr = newStream.Send(s.req); sendErr != nil {
-						continue
-					}
-					s.stream = newStream
-					reconnected = true
-					break
-				}
-				if !reconnected {
-					return fmt.Errorf("receiving log entries: %w", err)
-				}
-				continue
-			}
-			for _, entry := range resp.Entries {
-				f.PrintEntry(os.Stdout, protoToEntry(entry), s.logType)
-			}
-		}
-	}
-
-	// Multiple streams: read from each in separate goroutines, merge via channel.
-	type taggedProtoEntry struct {
-		entry   *logpb.LogEntry
-		logType LogType
-	}
-	ch := make(chan taggedProtoEntry, 100)
-	errCh := make(chan error, len(streams))
-
-	for _, s := range streams {
-		go func(si streamInfo) {
-			for {
-				resp, err := si.stream.Recv()
-				if err != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					errCh <- fmt.Errorf("receiving %s log entries: %w", si.logType, err)
-					return
-				}
-				for _, entry := range resp.Entries {
-					ch <- taggedProtoEntry{entry: entry, logType: si.logType}
-				}
-			}
-		}(s)
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-errCh:
-			return err
-		case te := <-ch:
-			f.PrintEntry(os.Stdout, protoToEntry(te.entry), te.logType)
-		}
-	}
+	filters, types := orderedFilters(projectID, jobID, logType, severity)
+	return logtail.Stream(ctx, projectID, filters, func(e *logging.Entry, idx int) {
+		f.PrintEntry(os.Stdout, e, types[idx])
+	})
 }
 
 // PrintLogs prints tagged log entries using the formatter.
@@ -264,45 +134,21 @@ func PrintLogs(entries []taggedEntry, f *LogFormatter) {
 	}
 }
 
-// protoToEntry converts a protobuf LogEntry to logging.Entry.
-func protoToEntry(entry *logpb.LogEntry) *logging.Entry {
-	var payload interface{}
-	switch p := entry.Payload.(type) {
-	case *logpb.LogEntry_TextPayload:
-		payload = p.TextPayload
-	case *logpb.LogEntry_JsonPayload:
-		if p.JsonPayload != nil {
-			payload = p.JsonPayload.AsMap()
-		}
-	case *logpb.LogEntry_ProtoPayload:
-		payload = p.ProtoPayload
-	}
-
-	e := &logging.Entry{
-		Timestamp: entry.Timestamp.AsTime(),
-		Severity:  logging.Severity(entry.Severity),
-		Payload:   payload,
-		Labels:    entry.Labels,
-	}
-	if entry.Resource != nil {
-		e.Resource = entry.Resource
-	}
-	return e
-}
-
-// LogFormatter handles colored log output for Dataflow logs.
+// LogFormatter handles colored log output for Dataflow logs, prefixing each line
+// with a [J]/[W]/[S] tag in "all" mode. The structured-payload formatting is
+// shared with the default formatter via logtail.FormatLogMap.
 type LogFormatter struct {
-	useColors  bool
-	showPrefix bool // show [J]/[W]/[S] prefix in "all" mode
-	timeColor  *color.Color
-	errorColor *color.Color
-	warnColor  *color.Color
-	infoColor  *color.Color
-	debugColor *color.Color
-	keyColor   *color.Color
-	jobColor   *color.Color
+	useColors   bool
+	showPrefix  bool // show [J]/[W]/[S] prefix in "all" mode
+	timeColor   *color.Color
+	errorColor  *color.Color
+	warnColor   *color.Color
+	infoColor   *color.Color
+	debugColor  *color.Color
+	keyColor    *color.Color
+	jobColor    *color.Color
 	workerColor *color.Color
-	stepColor  *color.Color
+	stepColor   *color.Color
 }
 
 // NewLogFormatter creates a formatter with TTY-aware color detection.
@@ -394,75 +240,9 @@ func (f *LogFormatter) formatMessage(entry *logging.Entry) string {
 	case string:
 		return v
 	case map[string]interface{}:
-		return f.formatLogMap(v)
+		return logtail.FormatLogMap(v, f.useColors, f.keyColor)
 	case *structpb.Struct:
-		return f.formatLogMap(v.AsMap())
+		return logtail.FormatLogMap(v.AsMap(), f.useColors, f.keyColor)
 	}
 	return fmt.Sprintf("%v", entry.Payload)
-}
-
-// formatLogMap formats a structured map payload.
-func (f *LogFormatter) formatLogMap(m map[string]interface{}) string {
-	metaKeys := map[string]bool{
-		"msg": true, "message": true, "text": true,
-		"level": true, "severity": true,
-		"time": true, "timestamp": true,
-		"labels": true, "resource": true, "insertId": true,
-	}
-
-	var msgKey string
-	for _, key := range []string{"message", "msg", "text"} {
-		if v, ok := m[key].(string); ok && v != "" {
-			msgKey = key
-			break
-		}
-	}
-
-	if msgKey != "" {
-		msg := m[msgKey].(string)
-		var keys []string
-		for k := range m {
-			if !metaKeys[k] {
-				keys = append(keys, k)
-			}
-		}
-		sort.Strings(keys)
-		var extras []string
-		for _, k := range keys {
-			s := fmt.Sprintf("%v", m[k])
-			if len(s) > 100 {
-				s = s[:100] + "..."
-			}
-			if f.useColors {
-				extras = append(extras, f.keyColor.Sprint(k+"=")+s)
-			} else {
-				extras = append(extras, k+"="+s)
-			}
-		}
-		if len(extras) > 0 {
-			return msg + "  " + strings.Join(extras, " ")
-		}
-		return msg
-	}
-
-	var keys []string
-	for k := range m {
-		if !metaKeys[k] {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	var parts []string
-	for _, k := range keys {
-		s := fmt.Sprintf("%v", m[k])
-		if len(s) > 100 {
-			s = s[:100] + "..."
-		}
-		if f.useColors {
-			parts = append(parts, f.keyColor.Sprint(k+"=")+s)
-		} else {
-			parts = append(parts, k+"="+s)
-		}
-	}
-	return strings.Join(parts, " ")
 }

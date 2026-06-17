@@ -227,8 +227,3 @@ func (b *BigQueryResource) FormatDetailed(info *ResourceInfo, aliasPath string) 
 func (b *BigQueryResource) FormatLongHeader() string {
 	return bigquery.FormatLongHeader()
 }
-
-// SupportsInfo returns whether BigQuery supports the info command
-func (b *BigQueryResource) SupportsInfo() bool {
-	return true
-}

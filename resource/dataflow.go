@@ -21,8 +21,7 @@ func CreateDataflowResource(formatter PathFormatter) *DataflowResource {
 	return &DataflowResource{formatter: formatter}
 }
 
-func (r *DataflowResource) Type() Type            { return TypeDataflow }
-func (r *DataflowResource) SupportsInfo() bool     { return false }
+func (r *DataflowResource) Type() Type               { return TypeDataflow }
 func (r *DataflowResource) FormatLongHeader() string { return dataflow.JobLongHeader() }
 
 func (r *DataflowResource) ParsePath(p string) (*PathComponents, error) {
@@ -95,14 +94,6 @@ func (r *DataflowResource) List(ctx context.Context, p string, opts *ListOptions
 		})
 	}
 	return resources, nil
-}
-
-func (r *DataflowResource) Remove(_ context.Context, _ string, _ *RemoveOptions) error {
-	return fmt.Errorf("removing Dataflow jobs via cio is not supported (use gcloud or the console)")
-}
-
-func (r *DataflowResource) Info(_ context.Context, _ string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("cio info is not yet supported for Dataflow jobs")
 }
 
 func (r *DataflowResource) FormatShort(info *ResourceInfo, _ string) string {

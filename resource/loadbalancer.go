@@ -12,16 +12,15 @@ import (
 const TypeLoadBalancer Type = "lb"
 
 type LoadBalancerResource struct {
-	formatter  PathFormatter
-	subType    string // "url-maps", "forwarding-rules", "backends"
+	formatter PathFormatter
+	subType   string // "url-maps", "forwarding-rules", "backends"
 }
 
 func CreateLoadBalancerResource(formatter PathFormatter) *LoadBalancerResource {
 	return &LoadBalancerResource{formatter: formatter}
 }
 
-func (r *LoadBalancerResource) Type() Type        { return TypeLoadBalancer }
-func (r *LoadBalancerResource) SupportsInfo() bool { return false }
+func (r *LoadBalancerResource) Type() Type { return TypeLoadBalancer }
 
 func parseLBPath(path string) (subType, name string) {
 	rest := strings.TrimPrefix(path, "lb://")
@@ -121,14 +120,6 @@ func (r *LoadBalancerResource) listBackendServices(ctx context.Context, project,
 		})
 	}
 	return resources, nil
-}
-
-func (r *LoadBalancerResource) Remove(ctx context.Context, path string, opts *RemoveOptions) error {
-	return fmt.Errorf("removing load balancer resources is not supported via cio")
-}
-
-func (r *LoadBalancerResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("use 'cio ls -l lb://' for load balancer details")
 }
 
 func (r *LoadBalancerResource) ParsePath(path string) (*PathComponents, error) {

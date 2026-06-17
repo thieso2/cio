@@ -80,10 +80,10 @@ const (
 	costByService costView = iota
 	costByProject
 	costByDay
-	costByDayService // daily breakdown by service
-	costByDayOne     // daily for a specific service
-	costByDayProject // daily breakdown by project
-	costBySKU        // SKU-level breakdown (all services)
+	costByDayService    // daily breakdown by service
+	costByDayOne        // daily for a specific service
+	costByDayProject    // daily breakdown by project
+	costBySKU           // SKU-level breakdown (all services)
 	costBySKUForService // SKU-level breakdown for one service
 )
 
@@ -166,8 +166,7 @@ func CreateCostResource(formatter PathFormatter, billingTable string) *CostResou
 	return &CostResource{formatter: formatter, billingTable: billingTable}
 }
 
-func (r *CostResource) Type() Type        { return TypeCost }
-func (r *CostResource) SupportsInfo() bool { return false }
+func (r *CostResource) Type() Type { return TypeCost }
 
 // Period returns the billing period as "YYYY-MM-DD to YYYY-MM-DD".
 // For the current month: first day to today. For past months: first to last day.
@@ -255,9 +254,9 @@ func (r *CostResource) List(ctx context.Context, path string, opts *ListOptions)
 func (r *CostResource) buildDayProjectResults(rows [][]gcpbq.Value) ([]*ResourceInfo, error) {
 	var maxProj int
 	type rawRow struct {
-		proj, dt                 string
-		gross, cred, net         float64
-		currency                 string
+		proj, dt         string
+		gross, cred, net float64
+		currency         string
 	}
 	var parsed []rawRow
 	for _, row := range rows {
@@ -478,14 +477,6 @@ func toFloat64(v interface{}) float64 {
 	default:
 		return 0
 	}
-}
-
-func (r *CostResource) Remove(_ context.Context, _ string, _ *RemoveOptions) error {
-	return fmt.Errorf("removing cost data is not supported")
-}
-
-func (r *CostResource) Info(_ context.Context, _ string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("info is not supported for cost data")
 }
 
 func (r *CostResource) ParsePath(path string) (*PathComponents, error) {

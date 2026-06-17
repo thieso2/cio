@@ -2,25 +2,21 @@ package loadbalancer
 
 import (
 	"context"
-	"sync"
 
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 	compute "google.golang.org/api/compute/v1"
 )
 
-var (
-	serviceOnce sync.Once
-	service     *compute.Service
-	serviceErr  error
-)
+// provider holds the singleton Compute REST API service (for LB resources).
+var provider gclient.Provider[*compute.Service]
 
 // GetService returns the singleton Compute REST API service (for LB resources).
 func GetService(ctx context.Context) (*compute.Service, error) {
-	serviceOnce.Do(func() {
+	return provider.Get(ctx, func(ctx context.Context) (*compute.Service, error) {
 		apilog.Logf("[LoadBalancer] compute.NewService()")
-		service, serviceErr = compute.NewService(ctx)
+		return compute.NewService(ctx)
 	})
-	return service, serviceErr
 }
 
 func Close() {}

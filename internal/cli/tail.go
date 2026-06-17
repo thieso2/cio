@@ -15,6 +15,7 @@ import (
 	"github.com/thieso2/cio/cloudrun"
 	"github.com/thieso2/cio/compute"
 	"github.com/thieso2/cio/dataflow"
+	"github.com/thieso2/cio/internal/logtail"
 	"github.com/thieso2/cio/pubsub"
 	"github.com/thieso2/cio/resolver"
 	"github.com/thieso2/cio/resource"
@@ -227,7 +228,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	// Single formatter shared by historical print and live stream so column
 	// widths accumulated during history are preserved in streaming mode.
-	f := cloudrun.NewLogFormatter(logPrefix, fixedPrefix)
+	f := logtail.NewFormatter(logPrefix, fixedPrefix)
 	if len(matchedJobs) > 0 && (execution == "" || tailAudit) {
 		f.SetKnownJobs(matchedJobs)
 	}
@@ -236,16 +237,17 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	// Fetch historical lines: n lines per job when wildcard was expanded,
 	// otherwise n lines total.
-	var entries []*logging.Entry
+	var fetchFilters []string
 	if len(matchedJobs) > 1 {
-		entries, err = cloudrun.FetchLogsMultiJob(ctx, projectID, region, matchedJobs, execution, tailNumLines, tailAudit, tailSeverity)
+		fetchFilters = cloudrun.PerJobFilters(projectID, region, matchedJobs, execution, tailAudit, tailSeverity)
 	} else {
-		entries, err = cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
+		fetchFilters = []string{filter}
 	}
+	entries, err := logtail.Fetch(ctx, projectID, fetchFilters, tailNumLines)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	cloudrun.PrintLogs(entries, f)
+	f.Print(entries)
 
 	if !tailFollow {
 		if len(entries) == 0 {
@@ -254,20 +256,32 @@ func runTail(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Then stream live using the same formatter.
-	ctx, cancel := context.WithCancel(ctx)
+	// Then stream live using the same formatter (single combined filter).
+	ctx, cancel := signalContext(ctx)
 	defer cancel()
+	return logtail.Stream(ctx, projectID, []string{filter}, func(e *logging.Entry, _ int) {
+		f.PrintEntry(os.Stdout, e)
+	})
+}
 
+// signalContext derives a context from parent that is cancelled on Ctrl+C
+// (SIGINT) or SIGTERM, printing "Interrupted." to stderr. The returned cancel
+// func also releases the signal handler and should be deferred. This is the one
+// home for the streaming interrupt handling shared by every tail path.
+func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
 	go func() {
-		<-sigChan
-		fmt.Fprintln(os.Stderr, "\nInterrupted.")
-		cancel()
+		select {
+		case <-sigChan:
+			fmt.Fprintln(os.Stderr, "\nInterrupted.")
+			cancel()
+		case <-ctx.Done():
+		}
+		signal.Stop(sigChan)
 	}()
-
-	return cloudrun.StreamLogs(ctx, projectID, filter, f)
+	return ctx, cancel
 }
 
 // looksLikeJobID returns true if the string looks like a Dataflow job ID
@@ -336,18 +350,8 @@ func runPubSubTail(psPath, projectOverride string) error {
 	ctx := context.Background()
 
 	if tailFollow {
-		ctx, cancel := context.WithCancel(ctx)
+		ctx, cancel := signalContext(ctx)
 		defer cancel()
-
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigChan)
-		go func() {
-			<-sigChan
-			fmt.Fprintln(os.Stderr, "\nInterrupted.")
-			cancel()
-		}()
-
 		fmt.Fprintf(os.Stderr, "Streaming metrics for %s... (Ctrl+C to stop)\n", name)
 		return pubsub.StreamMetrics(ctx, projectID, name, true, 30*time.Second)
 	}
@@ -427,18 +431,8 @@ func runDataflowTail(dfPath, projectOverride string) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := signalContext(ctx)
 	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	go func() {
-		<-sigChan
-		fmt.Fprintln(os.Stderr, "\nInterrupted.")
-		cancel()
-	}()
-
 	return dataflow.StreamLogs(ctx, projectID, jobID, lt, tailSeverity, f)
 }
 
@@ -529,17 +523,8 @@ func runVMSerialTail(projectID, zone, instanceName string) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := signalContext(ctx)
 	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	go func() {
-		<-sigChan
-		fmt.Fprintln(os.Stderr, "\nInterrupted.")
-		cancel()
-	}()
 
 	fmt.Fprintf(os.Stderr, "Streaming serial port output... (Ctrl+C to stop)\n")
 	for {
@@ -616,18 +601,18 @@ func runVMCloudLogTail(projectID string, instances []*compute.InstanceInfo) erro
 	if singleVM {
 		prefix = instances[0].Name
 	}
-	f := cloudrun.NewLogFormatter(prefix, singleVM)
+	f := logtail.NewFormatter(prefix, singleVM)
 	if !singleVM {
 		f.SetLabelKeys([]string{"instance_name"})
 	}
 
 	ctx := context.Background()
 
-	entries, err := cloudrun.FetchLogs(ctx, projectID, filter, tailNumLines)
+	entries, err := logtail.Fetch(ctx, projectID, []string{filter}, tailNumLines)
 	if err != nil {
 		return fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	cloudrun.PrintLogs(entries, f)
+	f.Print(entries)
 
 	if !tailFollow {
 		if len(entries) == 0 {
@@ -636,19 +621,11 @@ func runVMCloudLogTail(projectID string, instances []*compute.InstanceInfo) erro
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := signalContext(ctx)
 	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	go func() {
-		<-sigChan
-		fmt.Fprintln(os.Stderr, "\nInterrupted.")
-		cancel()
-	}()
-
-	return cloudrun.StreamLogs(ctx, projectID, filter, f)
+	return logtail.Stream(ctx, projectID, []string{filter}, func(e *logging.Entry, _ int) {
+		f.PrintEntry(os.Stdout, e)
+	})
 }
 
 func init() {

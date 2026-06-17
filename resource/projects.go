@@ -49,10 +49,6 @@ func (r *ProjectsResource) Type() Type {
 	return TypeProjects
 }
 
-func (r *ProjectsResource) SupportsInfo() bool {
-	return false
-}
-
 func (r *ProjectsResource) List(ctx context.Context, path string, opts *ListOptions) ([]*ResourceInfo, error) {
 	client, err := resourcemanager.NewProjectsClient(ctx)
 	if err != nil {
@@ -104,14 +100,6 @@ func (r *ProjectsResource) List(ctx context.Context, path string, opts *ListOpti
 	})
 
 	return resources, nil
-}
-
-func (r *ProjectsResource) Remove(ctx context.Context, path string, opts *RemoveOptions) error {
-	return fmt.Errorf("removing projects is not supported via cio")
-}
-
-func (r *ProjectsResource) Info(ctx context.Context, path string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("info is not supported for projects")
 }
 
 func (r *ProjectsResource) ParsePath(path string) (*PathComponents, error) {

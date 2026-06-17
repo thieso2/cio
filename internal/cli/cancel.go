@@ -77,21 +77,8 @@ Examples:
 func runDiscoverCancel(projectPattern, rest string) error {
 	ctx := context.Background()
 
-	projectIDs, err := resource.ListProjectIDs(ctx, projectPattern)
-	if err != nil {
-		return err
-	}
-	if len(projectIDs) == 0 {
-		fmt.Fprintf(os.Stderr, "No projects matching %s\n", projectPattern)
-		return nil
-	}
-
-	if verbose {
-		fmt.Fprintf(os.Stderr, "Discover: %d project(s) matching %s\n", len(projectIDs), projectPattern)
-	}
-
-	// rest is "jobPattern/*" or "jobPattern/executionPattern" or just "jobPattern"
-	// Default execution pattern to "*" if not specified
+	// rest is "jobPattern/*" or "jobPattern/executionPattern" or just "jobPattern".
+	// Default execution pattern to "*" if not specified.
 	jobPattern := rest
 	executionPattern := "*"
 	if slashIdx := strings.LastIndex(rest, "/"); slashIdx >= 0 {
@@ -101,7 +88,9 @@ func runDiscoverCancel(projectPattern, rest string) error {
 
 	hasJobWildcard := resolver.HasWildcard(jobPattern)
 
-	for _, projectID := range projectIDs {
+	// cancel builds its own jobs:// paths from the job/execution patterns, so the
+	// resourcePath supplied by the traversal is unused here.
+	return forEachDiscoveredProject(ctx, "jobs", projectPattern, rest, func(projectID, _ string) error {
 		region := cfg.Defaults.Region
 
 		if hasJobWildcard {
@@ -115,7 +104,7 @@ func runDiscoverCancel(projectPattern, rest string) error {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
 				}
-				continue
+				return nil
 			}
 
 			for _, job := range jobs {
@@ -149,8 +138,8 @@ func runDiscoverCancel(projectPattern, rest string) error {
 				}
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func init() {

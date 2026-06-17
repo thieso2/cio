@@ -2,27 +2,23 @@ package iam
 
 import (
 	"context"
-	"sync"
 
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 )
 
-var (
-	client     *iam.Service
-	clientOnce sync.Once
-	clientErr  error
-)
+// provider holds the singleton IAM service.
+var provider gclient.Provider[*iam.Service]
 
 // GetClient returns a singleton IAM client.
 // The client is initialized on first call and reused for subsequent calls.
 func GetClient(ctx context.Context, opts ...option.ClientOption) (*iam.Service, error) {
-	clientOnce.Do(func() {
+	return provider.Get(ctx, func(ctx context.Context) (*iam.Service, error) {
 		apilog.Logf("[IAM] NewService()")
-		client, clientErr = iam.NewService(ctx, opts...)
+		return iam.NewService(ctx, opts...)
 	})
-	return client, clientErr
 }
 
 // Close closes the IAM client.

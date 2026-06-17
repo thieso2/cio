@@ -25,11 +25,6 @@ func (r *IAMResource) Type() Type {
 	return TypeIAM
 }
 
-// SupportsInfo returns whether this resource type supports detailed info
-func (r *IAMResource) SupportsInfo() bool {
-	return true
-}
-
 // List lists IAM resources
 func (r *IAMResource) List(ctx context.Context, path string, opts *ListOptions) ([]*ResourceInfo, error) {
 	// Parse IAM path
@@ -65,11 +60,6 @@ func (r *IAMResource) List(ctx context.Context, path string, opts *ListOptions) 
 	}
 
 	return resources, nil
-}
-
-// Remove removes IAM resources (not supported)
-func (r *IAMResource) Remove(ctx context.Context, path string, opts *RemoveOptions) error {
-	return fmt.Errorf("removing IAM resources is not supported via cio (use gcloud or console)")
 }
 
 // Info returns detailed information about an IAM resource

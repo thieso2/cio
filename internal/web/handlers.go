@@ -160,8 +160,13 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get resource info
-	info, err := res.Info(ctx, fullPath)
+	// Get resource info (only resources implementing Infoable support this)
+	infoable, ok := res.(resource.Infoable)
+	if !ok {
+		writeError(w, fmt.Sprintf("info not supported for %s resources", res.Type()), http.StatusBadRequest)
+		return
+	}
+	info, err := infoable.Info(ctx, fullPath)
 	if err != nil {
 		writeError(w, fmt.Sprintf("failed to get resource info: %v", err), http.StatusInternalServerError)
 		return

@@ -186,13 +186,20 @@ graph TB
 ### Core Components
 
 **0. Resource Abstraction Layer (`resource/`)**
-- **Unified interface** for all resource types (GCS, BigQuery, IAM, Cloud Run, Dataflow, VM)
-- `Resource` interface defines common operations:
+- **Deep core interface** every resource type implements (`Resource`): only the
+  universally-supported operations live here, so the interface earns its keep:
   - `List()` - list resources at a path
-  - `Remove()` - delete resources
-  - `Info()` - get detailed information
   - `ParsePath()` - parse resource paths
-  - `FormatShort/Long/Detailed()` - format output
+  - `FormatShort/Long/Detailed()` / `FormatLongHeader()` - format output
+  - `Type()` - resource type
+- **Capability interfaces** for operations only some types support. Callers
+  type-assert to these instead of calling a method half the types stub out:
+  - `Removable` - `Remove()` (GCS, BigQuery, Cloud Run, VM, Pub/Sub, Cloud SQL)
+  - `Infoable` - `Info()` (BigQuery, IAM)
+  - `ProjectInfoable` - `InfoWithProject()` when info needs an explicit project (Pub/Sub, Cloud SQL)
+  - `Cancelable` - `Cancel()` (Cloud Run job executions)
+  - A type appears Removable only if it actually removes — no more `SupportsInfo()`
+    guards or stub methods returning "not supported".
 - Implementations:
   - `GCSResource` - handles GCS objects and directories
   - `BigQueryResource` - handles BigQuery datasets and tables
@@ -208,6 +215,25 @@ graph TB
   - Easy to add new resource types (Cloud Storage, Cloud SQL, etc.)
   - Consistent behavior across all commands
   - Simplified CLI command implementations
+
+**0b. Shared infrastructure modules (deep seams)**
+- **`gclient/` — generic client provider.** `gclient.Provider[T]` owns the
+  process-wide `sync.Once` + cached-`(value, error)` + Close bookkeeping. Each
+  service package (`storage`, `bigquery`, `compute`, `cloudrun`, `pubsub`, ...)
+  supplies only a constructor closure: `provider.Get(ctx, func(ctx) (T, error) {...})`.
+  Public `GetClient()/GetService()/Close()` signatures are unchanged.
+- **`internal/logtail/` — one Cloud Logging engine.** Fetching history
+  (`Fetch`, logadmin, tagged per filter), streaming live (`Stream`, gRPC
+  TailLogEntries with retry + multi-filter merge), protobuf conversion
+  (`ProtoToEntry`), and the default label-prefixed `Formatter`. Cloud Run, VM,
+  and Dataflow tailing all sit on this; only filter strings (and Dataflow's
+  tag-formatter) stay per resource type. VM tailing no longer imports `cloudrun`.
+- **`internal/cli/discover.go` — one discover-mode traversal.** Holds
+  `parseDiscoverPath`, `buildDiscoverResourcePath`, the name-prefixing helpers,
+  and the two seams `discoverProjects` (list + notice + verbose) and
+  `forEachDiscoveredProject(scheme, pattern, rest, fn)`. `ls`/`stop`/`cancel`
+  pass their one varying step as a callback; `rm` uses `discoverProjects` for its
+  two-pass collect → confirm → delete.
 
 **1. Alias Resolution Flow (`internal/resolver/`)**
 - `Resolver` converts alias paths (with `:` prefix) to full paths using config mappings

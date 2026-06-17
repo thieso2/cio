@@ -2,25 +2,21 @@ package cloudsql
 
 import (
 	"context"
-	"sync"
 
 	"github.com/thieso2/cio/apilog"
+	"github.com/thieso2/cio/gclient"
 	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
-var (
-	serviceOnce sync.Once
-	service     *sqladmin.Service
-	serviceErr  error
-)
+// provider holds the singleton Cloud SQL Admin service.
+var provider gclient.Provider[*sqladmin.Service]
 
 // GetService returns the singleton Cloud SQL Admin service.
 func GetService(ctx context.Context) (*sqladmin.Service, error) {
-	serviceOnce.Do(func() {
+	return provider.Get(ctx, func(ctx context.Context) (*sqladmin.Service, error) {
 		apilog.Logf("[CloudSQL] sqladmin.NewService()")
-		service, serviceErr = sqladmin.NewService(ctx)
+		return sqladmin.NewService(ctx)
 	})
-	return service, serviceErr
 }
 
 // Close is a no-op for the REST-based sqladmin service (kept for consistency).

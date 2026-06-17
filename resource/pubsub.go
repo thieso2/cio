@@ -23,8 +23,7 @@ func CreatePubSubResource(formatter PathFormatter) *PubSubResource {
 	return &PubSubResource{formatter: formatter}
 }
 
-func (r *PubSubResource) Type() Type         { return TypePubSub }
-func (r *PubSubResource) SupportsInfo() bool { return true }
+func (r *PubSubResource) Type() Type { return TypePubSub }
 
 func (r *PubSubResource) ParsePath(p string) (*PathComponents, error) {
 	return &PathComponents{ResourceType: TypePubSub}, nil
@@ -156,12 +155,6 @@ func (r *PubSubResource) listSubs(ctx context.Context, project, namePattern stri
 	return resources, nil
 }
 
-// Info returns detailed information about a topic or subscription.
-func (r *PubSubResource) Info(_ context.Context, p string) (*ResourceInfo, error) {
-	_, name := pubsub.ParsePubSubPath(p)
-	return nil, fmt.Errorf("use InfoWithProject for pubsub info (resource: %s)", name)
-}
-
 // InfoWithProject returns detailed information with explicit project ID.
 func (r *PubSubResource) InfoWithProject(ctx context.Context, p string, projectID string) (*ResourceInfo, error) {
 	resType, name := pubsub.ParsePubSubPath(p)
@@ -201,9 +194,9 @@ func (r *PubSubResource) topicInfo(ctx context.Context, projectID, name string) 
 	}
 
 	details := &topicDetails{
-		Topic:           topic,
-		Subscriptions:   topicSubs,
-		DeadLetterRefs:  dlRefs,
+		Topic:          topic,
+		Subscriptions:  topicSubs,
+		DeadLetterRefs: dlRefs,
 	}
 
 	return &ResourceInfo{

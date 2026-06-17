@@ -15,7 +15,7 @@ const TypeVM Type = "vm"
 
 // VMResource implements Resource for Compute Engine VM instances.
 type VMResource struct {
-	formatter  PathFormatter
+	formatter   PathFormatter
 	listingMode string // set by List() to drive FormatLongHeader()
 }
 
@@ -24,8 +24,7 @@ func CreateVMResource(formatter PathFormatter) *VMResource {
 	return &VMResource{formatter: formatter}
 }
 
-func (r *VMResource) Type() Type           { return TypeVM }
-func (r *VMResource) SupportsInfo() bool   { return false }
+func (r *VMResource) Type() Type { return TypeVM }
 
 func (r *VMResource) FormatLongHeader() string {
 	if r.listingMode == "zones" {
@@ -351,10 +350,6 @@ func parallelDelete(ctx context.Context, project string, instances []*compute.In
 	}
 	wg.Wait()
 	return errs
-}
-
-func (r *VMResource) Info(_ context.Context, _ string) (*ResourceInfo, error) {
-	return nil, fmt.Errorf("cio info is not yet supported for VM instances")
 }
 
 func (r *VMResource) FormatShort(info *ResourceInfo, _ string) string {
