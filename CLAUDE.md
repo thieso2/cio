@@ -349,6 +349,13 @@ graph TB
   - VM Cloud Logging: `cio tail vm://zone/instance`, wildcards `vm://*/pattern*`
   - VM serial port: `cio tail -f vm://zone/instance/serial`
   - Multi-VM tailing: colored `[instance-name]` prefixes per instance
+  - Discover mode (explicit project): every scheme accepts `scheme:/PROJECT/rest` to
+    read logs from a specific project instead of the configured default, e.g.
+    `cio tail -f jobs:/my-project/` (all jobs), `cio tail svc:/my-project/my-svc`,
+    `cio tail dataflow:/my-project/my-job`, `cio tail 'vm:/my-project/instance*'`.
+    The project must be a concrete id (wildcards rejected — logs are read one project
+    at a time). Bare `scheme://` (e.g. `cio tail jobs://`) tails all jobs in the
+    default project.
   - `-f` for follow/stream mode, `-n N` for line count, `-s` for severity filter
 - **shell.go**: Interactive BigQuery SQL shell (`cio query`)
   - Uses `peterh/liner` for proper horizontal scrolling on long lines
@@ -945,9 +952,16 @@ cio stop 'vm:/iom-*/bast*'
 
 # Cancel Cloud Run job executions across projects
 cio cancel 'jobs:/iom-*/sqlmesh*/*'
+
+# Tail logs from a specific project (tail requires a concrete project, not a wildcard)
+cio tail -f jobs:/iom-data-io2604/          # all jobs in the project
+cio tail svc:/iom-data-io2604/my-service    # a specific service
+cio tail dataflow:/iom-data-io2604/my-job   # a Dataflow job
 ```
 
 **Discover mode output format**: resource names are printed as CLI-usable paths (`scheme:/project/name`), so you can copy-paste them directly into commands. For example, `vm:/iom-dev-dirk/iomp-ingress-t3rt`.
+
+**`tail` discover mode**: unlike `ls`/`stop`/`rm`/`cancel` (which fan out across wildcard-matching projects), `tail` reads logs from a single project at a time, so it accepts `scheme:/PROJECT/rest` only with a concrete project id — wildcard project patterns are rejected. The project from the path overrides `defaults.project_id` for that command.
 
 ## Future Features (Phase 7+)
 - Web server for file browsing (config: `server.port`, `server.host`, `server.auto_start`)

@@ -44,6 +44,17 @@ Paths:
   vm://*/pattern*                 VM logs across all zones (wildcard)
   pubsub://subs/sub-name          Pub/Sub subscription metrics
 
+Discover mode (single slash = explicit project):
+  Any scheme accepts scheme:/PROJECT/rest to read logs from a specific project
+  instead of the configured default. The project must be a concrete id (no
+  wildcards), since logs are read from one project at a time.
+
+    jobs:/my-project/                 all job executions in my-project
+    jobs:/my-project/my-job           a specific job in my-project
+    svc:/my-project/my-service        a service in my-project
+    vm:/my-project/instance*          VMs matching a pattern in my-project
+    dataflow:/my-project/my-job       a Dataflow job in my-project
+
 Dataflow log types (--log-type):
   all      All log types with [J]/[W]/[S] prefix (default)
   job      Job-level orchestration logs
@@ -56,6 +67,9 @@ Examples:
 
   # Stream live logs from all executions of a job
   cio tail -f jobs://archived-metrics-importer
+
+  # Stream logs from all jobs in a specific project (discover mode)
+  cio tail -f jobs:/my-project/
 
   # Show Dataflow job logs
   cio tail dataflow://2024-01-15_12_00_00-12345
@@ -98,14 +112,17 @@ See 'cio tail --help' for path format and examples.`,
 func runTail(cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
 
-	// Discover mode: vm:/project/instance → rewrite to vm://*/instance with explicit project.
-	if projectPattern, scheme, rest, ok := parseDiscoverPath(inputPath); ok && scheme == "vm" {
-		// Non-wildcard project: use it directly; wildcard project not supported for tail.
+	// Discover mode: scheme:/project/rest → use the named project and rewrite to the
+	// normal scheme://rest form. Works for every tailable scheme (jobs, svc, worker,
+	// dataflow, vm, pubsub). Tailing reads logs from a single project, so a wildcard
+	// project pattern is not supported here — require a concrete project id.
+	projectOverride := ""
+	if projectPattern, scheme, rest, ok := parseDiscoverPath(inputPath); ok {
 		if strings.ContainsAny(projectPattern, "*?") {
-			return fmt.Errorf("wildcard project patterns are not supported for 'cio tail'; use a specific project: vm:/project/instance")
+			return fmt.Errorf("wildcard project patterns are not supported for 'cio tail'; use a specific project: %s:/project/...", scheme)
 		}
-		vmPath := "vm://*/" + rest
-		return runVMTail(vmPath, projectPattern)
+		projectOverride = projectPattern
+		inputPath = buildTailDiscoverPath(scheme, rest)
 	}
 
 	// Resolve alias if needed
@@ -120,17 +137,17 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	// Dispatch to Pub/Sub handler if applicable.
 	if resolver.IsPubSubPath(inputPath) {
-		return runPubSubTail(inputPath)
+		return runPubSubTail(inputPath, projectOverride)
 	}
 
 	// Dispatch to Dataflow handler if applicable.
 	if resolver.IsDataflowPath(inputPath) {
-		return runDataflowTail(inputPath)
+		return runDataflowTail(inputPath, projectOverride)
 	}
 
 	// Dispatch to VM handler if applicable.
 	if resolver.IsVMPath(inputPath) {
-		return runVMTail(inputPath, "")
+		return runVMTail(inputPath, projectOverride)
 	}
 
 	crPath := inputPath
@@ -138,7 +155,10 @@ func runTail(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("tail only supports Cloud Run (svc://, jobs://, worker://), Dataflow (dataflow://), VM (vm://), and Pub/Sub (pubsub://) paths, got: %s", crPath)
 	}
 
-	projectID := cfg.Defaults.ProjectID
+	projectID := projectOverride
+	if projectID == "" {
+		projectID = cfg.Defaults.ProjectID
+	}
 	if projectID == "" {
 		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 	}
@@ -258,16 +278,35 @@ func looksLikeJobID(s string) bool {
 	return len(s) > 20 && s[4] == '-' && s[7] == '-' && s[10] == '_'
 }
 
+// buildTailDiscoverPath rewrites a discover-mode tail path (scheme + rest, with the
+// project stripped off) into the normal scheme://... form that the tail handlers expect.
+// For VM paths, a rest without an explicit zone is matched across all zones (zone "*").
+func buildTailDiscoverPath(scheme, rest string) string {
+	if scheme == "vm" {
+		if rest == "" {
+			return "vm://*/"
+		}
+		if !strings.Contains(rest, "/") {
+			return "vm://*/" + rest
+		}
+		return "vm://" + rest
+	}
+	return scheme + "://" + rest
+}
+
 // parseTailPath splits a Cloud Run path into (scheme, name, execution).
-// Trailing slashes are stripped so "jobs://my-job/" → name "my-job".
+// Trailing slashes are stripped from the rest, so "jobs://my-job/" → name "my-job"
+// and a bare "jobs://" yields scheme "jobs" with an empty name (all jobs).
 func parseTailPath(path string) (scheme, name, execution string) {
-	path = strings.TrimRight(path, "/")
 	for _, s := range []string{"svc", "jobs", "worker"} {
 		prefix := s + "://"
 		if strings.HasPrefix(path, prefix) {
-			rest := strings.TrimPrefix(path, prefix)
-			parts := strings.SplitN(rest, "/", 2)
 			scheme = s
+			rest := strings.TrimRight(strings.TrimPrefix(path, prefix), "/")
+			if rest == "" {
+				return
+			}
+			parts := strings.SplitN(rest, "/", 2)
 			name = parts[0]
 			if len(parts) > 1 {
 				execution = parts[1]
@@ -279,8 +318,12 @@ func parseTailPath(path string) (scheme, name, execution string) {
 }
 
 // runPubSubTail handles tail/show for Pub/Sub subscription metrics.
-func runPubSubTail(psPath string) error {
-	projectID := cfg.Defaults.ProjectID
+// projectOverride, if non-empty, takes precedence over cfg.Defaults.ProjectID.
+func runPubSubTail(psPath, projectOverride string) error {
+	projectID := projectOverride
+	if projectID == "" {
+		projectID = cfg.Defaults.ProjectID
+	}
 	if projectID == "" {
 		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 	}
@@ -313,8 +356,12 @@ func runPubSubTail(psPath string) error {
 }
 
 // runDataflowTail handles tail/show for Dataflow paths.
-func runDataflowTail(dfPath string) error {
-	projectID := cfg.Defaults.ProjectID
+// projectOverride, if non-empty, takes precedence over cfg.Defaults.ProjectID.
+func runDataflowTail(dfPath, projectOverride string) error {
+	projectID := projectOverride
+	if projectID == "" {
+		projectID = cfg.Defaults.ProjectID
+	}
 	if projectID == "" {
 		return fmt.Errorf("project ID is required (use --project flag or set defaults.project_id in config)")
 	}
