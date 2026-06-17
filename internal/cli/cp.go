@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	cpRecursive  bool
-	cpForceCopy  bool
+	cpRecursive bool
+	cpForceCopy bool
 )
 
 // cpCmd represents the cp command
@@ -78,15 +78,9 @@ func runCp(cmd *cobra.Command, args []string) error {
 	var destPath string
 	var destWasAlias bool
 	if !destIsLocal {
-		if resolver.IsGCSPath(destination) {
-			destPath = destination
-		} else {
-			var err error
-			destPath, err = r.Resolve(destination)
-			if err != nil {
-				return fmt.Errorf("failed to resolve destination: %w", err)
-			}
-			destWasAlias = true
+		var err error
+		if _, destPath, destWasAlias, err = resolveInput(destination); err != nil {
+			return fmt.Errorf("failed to resolve destination: %w", err)
 		}
 	} else {
 		destPath = destination
@@ -104,14 +98,8 @@ func runCp(cmd *cobra.Command, args []string) error {
 		var sourcePath string
 		var sourceWasAlias bool
 		if !sourceIsLocal {
-			if resolver.IsGCSPath(source) {
-				sourcePath = source
-			} else {
-				sourcePath, err = r.Resolve(source)
-				if err != nil {
-					return fmt.Errorf("failed to resolve source %q: %w", source, err)
-				}
-				sourceWasAlias = true
+			if _, sourcePath, sourceWasAlias, err = resolveInput(source); err != nil {
+				return fmt.Errorf("failed to resolve source %q: %w", source, err)
 			}
 		} else {
 			sourcePath = source

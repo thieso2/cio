@@ -35,10 +35,7 @@ func (n *GCSIAMPolicyDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, 
 }
 
 func (n *GCSIAMPolicyDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -95,12 +92,7 @@ func (n *GCSIAMPolicyFileNode) Getattr(ctx context.Context, f fs.FileHandle, out
 		return MapGCPError(err)
 	}
 
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0644, len(content))
 	return 0
 }
 
@@ -178,10 +170,7 @@ func (n *GCSIAMByRoleDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, 
 }
 
 func (n *GCSIAMByRoleDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -229,10 +218,7 @@ func (n *GCSIAMRoleDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, sy
 }
 
 func (n *GCSIAMRoleDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -283,10 +269,7 @@ func (n *GCSIAMByMemberDirectoryNode) Readdir(ctx context.Context) (fs.DirStream
 }
 
 func (n *GCSIAMByMemberDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -334,10 +317,7 @@ func (n *GCSIAMMemberDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, 
 }
 
 func (n *GCSIAMMemberDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -372,12 +352,7 @@ func (n *GCSIAMMarkerFileNode) Open(ctx context.Context, flags uint32) (fh fs.Fi
 }
 
 func (n *GCSIAMMarkerFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = 0
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0644, 0)
 	return 0
 }
 
@@ -411,10 +386,7 @@ func (n *BQIAMPolicyDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, s
 }
 
 func (n *BQIAMPolicyDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -481,12 +453,7 @@ func (n *BQIAMPolicyFileNode) Getattr(ctx context.Context, f fs.FileHandle, out 
 		return MapGCPError(err)
 	}
 
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0644, len(content))
 	return 0
 }
 
@@ -565,10 +532,7 @@ func (n *BQIAMByRoleDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, s
 }
 
 func (n *BQIAMByRoleDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -618,10 +582,7 @@ func (n *BQIAMRoleDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, sys
 }
 
 func (n *BQIAMRoleDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -673,10 +634,7 @@ func (n *BQIAMByMemberDirectoryNode) Readdir(ctx context.Context) (fs.DirStream,
 }
 
 func (n *BQIAMByMemberDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -726,10 +684,7 @@ func (n *BQIAMMemberDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, s
 }
 
 func (n *BQIAMMemberDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -764,12 +719,7 @@ func (n *BQIAMMarkerFileNode) Open(ctx context.Context, flags uint32) (fh fs.Fil
 }
 
 func (n *BQIAMMarkerFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = 0
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0644, 0)
 	return 0
 }
 

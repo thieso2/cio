@@ -19,6 +19,50 @@ func Create(cfg *config.Config) *Resolver {
 	}
 }
 
+// joinStyle says how an alias suffix joins onto a base path of a given scheme.
+type joinStyle int
+
+const (
+	joinGCS   joinStyle = iota // slash separator, base normalized to end with "/"
+	joinDot                    // dot separator (BigQuery)
+	joinSlash                  // slash separator, no normalization
+)
+
+// schemes is the single source of truth for which prefixes are full paths and
+// how their alias suffixes join. IsDirectPath, the alias join in Resolve, and
+// the reverse join in ReverseResolve all derive from this one table instead of
+// each hand-listing the scheme set (three lists that had drifted apart). The
+// match predicates own the prefix strings; adding a scheme is one row here
+// (plus a factory registry row for its handler).
+var schemes = []struct {
+	match func(string) bool
+	join  joinStyle
+}{
+	{IsGCSPath, joinGCS},
+	{IsBQPath, joinDot},
+	{IsIAMPath, joinGCS},
+	{IsCloudRunPath, joinSlash},
+	{IsDataflowPath, joinSlash},
+	{IsVMPath, joinSlash},
+	{IsPubSubPath, joinSlash},
+	{IsCloudSQLPath, joinGCS},
+	{IsLoadBalancerPath, joinGCS},
+	{IsCertManagerPath, joinGCS},
+	{IsProjectsPath, joinGCS},
+	{IsCostPath, joinGCS},
+}
+
+// schemeJoin returns the join style for path's scheme and whether any scheme
+// matched (i.e. whether path is a direct path at all).
+func schemeJoin(path string) (joinStyle, bool) {
+	for _, s := range schemes {
+		if s.match(path) {
+			return s.join, true
+		}
+	}
+	return joinGCS, false
+}
+
 // Resolve converts an alias path to a full GCS/BigQuery path
 // Input: ":am/2024/01/data.txt"
 // Output: "gs://io-spooler-onprem-archived-metrics/2024/01/data.txt"
@@ -70,24 +114,23 @@ func (r *Resolver) Resolve(aliasPath string) (string, error) {
 		return "", fmt.Errorf("alias %q not found (run 'cio map list' to see available mappings)", alias)
 	}
 
-	// Handle path joining based on type
+	// Handle path joining based on the base path's scheme (see schemes table).
 	var fullPath string
-	if strings.HasPrefix(basePath, "bq://") {
-		// BigQuery path - use dot separator
+	join, _ := schemeJoin(basePath)
+	switch join {
+	case joinDot:
 		if suffix != "" {
 			fullPath = basePath + "." + suffix
 		} else {
 			fullPath = basePath
 		}
-	} else if strings.HasPrefix(basePath, "svc://") || strings.HasPrefix(basePath, "jobs://") || strings.HasPrefix(basePath, "worker://") || strings.HasPrefix(basePath, "dataflow://") || strings.HasPrefix(basePath, "vm://") || strings.HasPrefix(basePath, "pubsub://") {
-		// Cloud Run / Dataflow / VM path - use slash separator, no normalization
+	case joinSlash:
 		if suffix != "" {
 			fullPath = basePath + "/" + suffix
 		} else {
 			fullPath = basePath
 		}
-	} else {
-		// GCS path - use slash separator and normalize
+	default: // joinGCS: slash separator, normalized base
 		basePath = NormalizePath(basePath)
 		fullPath = basePath + suffix
 	}
@@ -188,33 +231,30 @@ func (r *Resolver) ReverseResolve(fullPath string) string {
 		return fullPath
 	}
 
-	// Try to find a matching alias
+	// Try to find a matching alias, joining the suffix the same way Resolve did.
 	for alias, basePath := range r.config.ListMappings() {
-		if strings.HasPrefix(basePath, "bq://") {
-			// BigQuery path - match with dot separator
+		join, _ := schemeJoin(basePath)
+		switch join {
+		case joinDot:
 			if strings.HasPrefix(fullPath, basePath) {
-				suffix := strings.TrimPrefix(fullPath, basePath)
-				suffix = strings.TrimPrefix(suffix, ".")
+				suffix := strings.TrimPrefix(strings.TrimPrefix(fullPath, basePath), ".")
 				if suffix == "" {
 					return ":" + alias
 				}
 				return ":" + alias + "." + suffix
 			}
-		} else if IsCloudRunPath(basePath) || IsDataflowPath(basePath) || IsVMPath(basePath) || IsPubSubPath(basePath) {
-			// Cloud Run / Dataflow / VM path - match with slash separator
+		case joinSlash:
 			if strings.HasPrefix(fullPath, basePath) {
-				suffix := strings.TrimPrefix(fullPath, basePath)
-				suffix = strings.TrimPrefix(suffix, "/")
+				suffix := strings.TrimPrefix(strings.TrimPrefix(fullPath, basePath), "/")
 				if suffix == "" {
 					return ":" + alias
 				}
 				return ":" + alias + "/" + suffix
 			}
-		} else {
-			// GCS path - match with slash separator
-			basePath = NormalizePath(basePath)
-			if strings.HasPrefix(fullPath, basePath) {
-				suffix := strings.TrimPrefix(fullPath, basePath)
+		default: // joinGCS
+			bp := NormalizePath(basePath)
+			if strings.HasPrefix(fullPath, bp) {
+				suffix := strings.TrimPrefix(fullPath, bp)
 				if suffix == "" {
 					return ":" + alias
 				}
@@ -302,10 +342,8 @@ func IsCostPath(path string) bool {
 // canonical union of every scheme. Commands ask it instead of hand-listing their
 // own subset of IsXPath checks (which had drifted into three divergent lists).
 func IsDirectPath(path string) bool {
-	return IsGCSPath(path) || IsBQPath(path) || IsIAMPath(path) ||
-		IsCloudRunPath(path) || IsDataflowPath(path) || IsVMPath(path) ||
-		IsPubSubPath(path) || IsCloudSQLPath(path) || IsLoadBalancerPath(path) ||
-		IsCertManagerPath(path) || IsProjectsPath(path) || IsCostPath(path)
+	_, ok := schemeJoin(path)
+	return ok
 }
 
 // GetAliasForInput extracts the alias from user input if one was used

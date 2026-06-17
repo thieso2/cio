@@ -10,8 +10,8 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"github.com/thieso2/cio/apilog"
-	"google.golang.org/api/iterator"
 	bqapi "google.golang.org/api/bigquery/v2"
+	"google.golang.org/api/iterator"
 )
 
 // BQObjectInfo holds information about a BigQuery object (dataset or table)
@@ -61,7 +61,7 @@ func (bi *BQObjectInfo) FormatLong() string {
 		size = "-"
 	}
 
-	return fmt.Sprintf("%s  %-18s  %-15s  %s", created, bi.Type, size, bi.Path)
+	return fmt.Sprintf("%s\t%s\t%s\t%s", created, bi.Type, size, bi.Path)
 }
 
 // FormatLongWithAlias formats BigQuery object info in long format using alias path
@@ -80,12 +80,12 @@ func (bi *BQObjectInfo) FormatLongWithAlias(aliasPath string) string {
 		rows = "-"
 	}
 
-	return fmt.Sprintf("%-18s  %15s  %20s  %s", bi.Type, size, rows, aliasPath)
+	return fmt.Sprintf("%s\t%s\t%s\t%s", bi.Type, size, rows, aliasPath)
 }
 
 // FormatLongHeader returns the header for long format listing
 func FormatLongHeader() string {
-	return fmt.Sprintf("%-18s  %15s  %20s  %s", "TYPE", "SIZE", "ROWS", "PATH")
+	return "TYPE\tSIZE\tROWS\tPATH"
 }
 
 // FormatDetailed formats BigQuery table info with schema details
@@ -523,10 +523,11 @@ func bqTableType(t bigquery.TableType) string {
 
 // ParseBQPath parses a bq:// path into components
 // Examples:
-//   bq:// -> ("", "", "") - list datasets in default project
-//   bq://project-id -> (project-id, "", "")
-//   bq://project-id.dataset -> (project-id, dataset, "")
-//   bq://project-id.dataset.table -> (project-id, dataset, table)
+//
+//	bq:// -> ("", "", "") - list datasets in default project
+//	bq://project-id -> (project-id, "", "")
+//	bq://project-id.dataset -> (project-id, dataset, "")
+//	bq://project-id.dataset.table -> (project-id, dataset, table)
 func ParseBQPath(bqPath string) (projectID, datasetID, tableID string, err error) {
 	if !strings.HasPrefix(bqPath, "bq://") {
 		return "", "", "", fmt.Errorf("not a valid BigQuery path: %s", bqPath)

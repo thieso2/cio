@@ -214,53 +214,57 @@ Examples (Pub/Sub):
 			return nil
 		}
 
-		// Cost: print billing period
+		// Cost keeps its own adaptive formatting (right-aligned money columns,
+		// dynamic label widths, and a trailing total) — it prints directly
+		// rather than through the tab-aligned renderer.
 		if resolver.IsCostPath(fullPath) {
 			if cr, ok := res.(*resource.CostResource); ok {
 				if p := cr.Period(); p != "" {
 					fmt.Fprintf(os.Stderr, "Period: %s\n", p)
 				}
+				if lsLongFormat {
+					fmt.Println(cr.FormatLongHeader())
+				} else {
+					fmt.Println(cr.FormatHeader())
+				}
 			}
+			for _, info := range resources {
+				if lsLongFormat {
+					fmt.Println(res.FormatLong(info, info.Path))
+				} else {
+					fmt.Println(res.FormatShort(info, info.Path))
+				}
+			}
+			if len(resources) > 1 {
+				resource.PrintCostTotal(resources, lsLongFormat)
+			}
+			return nil
 		}
 
-		// Cost always shows a header (even in short format)
-		if resolver.IsCostPath(fullPath) && !lsLongFormat {
-			if cr, ok := res.(*resource.CostResource); ok {
-				fmt.Println(cr.FormatHeader())
-			}
-		}
-
-		// Print header for long format if resource type provides one
+		// Everything else: build tab-separated rows and let renderTable size
+		// each column to its data.
+		header := ""
 		if lsLongFormat {
-			var header string
 			if resolver.IsCloudRunPath(fullPath) || resolver.IsDataflowPath(fullPath) {
 				header = resource.FormatLongHeaderDynamic(resources)
 			} else {
 				header = res.FormatLongHeader()
 			}
-			if header != "" {
-				fmt.Println(header)
-			}
 		}
 
-		// Print results
+		rows := make([]string, 0, len(resources))
 		for _, info := range resources {
 			displayPath := info.Path
 			if shouldReverseMap {
 				displayPath = r.ReverseResolve(info.Path)
 			}
-
 			if lsLongFormat {
-				fmt.Println(res.FormatLong(info, displayPath))
+				rows = append(rows, res.FormatLong(info, displayPath))
 			} else {
-				fmt.Println(res.FormatShort(info, displayPath))
+				rows = append(rows, res.FormatShort(info, displayPath))
 			}
 		}
-
-		// Print total line for cost output
-		if resolver.IsCostPath(fullPath) && len(resources) > 1 {
-			resource.PrintCostTotal(resources, lsLongFormat)
-		}
+		renderTable(header, rows, "")
 
 		return nil
 	},
@@ -294,38 +298,31 @@ func printPubSubSections(resources []*resource.ResourceInfo, res resource.Resour
 		}
 	}
 
-	if len(topics) > 0 {
-		fmt.Printf("Topics (%d):\n", len(topics))
-		for _, info := range topics {
+	section := func(title string, infos []*resource.ResourceInfo) {
+		fmt.Printf("%s (%d):\n", title, len(infos))
+		rows := make([]string, 0, len(infos))
+		for _, info := range infos {
 			displayPath := info.Path
 			if shouldReverseMap {
 				displayPath = r.ReverseResolve(info.Path)
 			}
 			if longFormat {
-				fmt.Println("  " + res.FormatLong(info, displayPath))
+				rows = append(rows, res.FormatLong(info, displayPath))
 			} else {
-				fmt.Println("  " + res.FormatShort(info, displayPath))
+				rows = append(rows, res.FormatShort(info, displayPath))
 			}
 		}
+		renderTable("", rows, "  ")
 	}
 
+	if len(topics) > 0 {
+		section("Topics", topics)
+	}
 	if len(topics) > 0 && len(subs) > 0 {
 		fmt.Println()
 	}
-
 	if len(subs) > 0 {
-		fmt.Printf("Subscriptions (%d):\n", len(subs))
-		for _, info := range subs {
-			displayPath := info.Path
-			if shouldReverseMap {
-				displayPath = r.ReverseResolve(info.Path)
-			}
-			if longFormat {
-				fmt.Println("  " + res.FormatLong(info, displayPath))
-			} else {
-				fmt.Println("  " + res.FormatShort(info, displayPath))
-			}
-		}
+		section("Subscriptions", subs)
 	}
 }
 
@@ -378,8 +375,12 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 	factory := resource.CreateFactory(r.ReverseResolve)
 
 	// JSON mode: collect all resources across projects, output as single array.
+	// Text mode: collect tab-separated rows (and the header once) so the whole
+	// cross-project listing aligns as one table, rendered after the walk.
 	var allResources []*resource.ResourceInfo
-	headerPrinted := false
+	var rows []string
+	header := ""
+	headerCaptured := false
 
 	err := forEachDiscoveredProject(ctx, scheme, projectPattern, rest, func(projectID, resourcePath string) error {
 		if verbose {
@@ -424,18 +425,14 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 		}
 		sortResources(resources, lsSortBySize, sortByTime)
 
-		// Print header once
-		if lsLongFormat && !headerPrinted {
-			var header string
+		// Capture the header once (first project that returns rows).
+		if lsLongFormat && !headerCaptured {
 			if resolver.IsCloudRunPath(resourcePath) || resolver.IsDataflowPath(resourcePath) {
 				header = resource.FormatLongHeaderDynamic(resources)
 			} else {
 				header = res.FormatLongHeader()
 			}
-			if header != "" {
-				fmt.Println(header)
-			}
-			headerPrinted = true
+			headerCaptured = true
 		}
 
 		// Prefix project name to each resource
@@ -448,18 +445,22 @@ func runDiscoverMode(cmd *cobra.Command, scheme, projectPattern, rest string) er
 			return nil
 		}
 
-		// Print results with project prefix
+		// Collect rows with project prefix for one aligned render.
 		for _, info := range resources {
 			if lsLongFormat {
-				fmt.Println(res.FormatLong(info, info.Path))
+				rows = append(rows, res.FormatLong(info, info.Path))
 			} else {
-				fmt.Println(res.FormatShort(info, info.Path))
+				rows = append(rows, res.FormatShort(info, info.Path))
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+
+	if !outputJSON {
+		renderTable(header, rows, "")
 	}
 
 	if outputJSON {

@@ -126,14 +126,10 @@ func runTail(cmd *cobra.Command, args []string) error {
 		inputPath = buildTailDiscoverPath(scheme, rest)
 	}
 
-	// Resolve alias if needed
-	r := resolver.Create(cfg)
-	var err error
-	if !resolver.IsCloudRunPath(inputPath) && !resolver.IsDataflowPath(inputPath) && !resolver.IsVMPath(inputPath) && !resolver.IsPubSubPath(inputPath) {
-		inputPath, err = r.Resolve(inputPath)
-		if err != nil {
-			return err
-		}
+	// Resolve alias if needed (direct paths pass through unchanged).
+	_, inputPath, _, err := resolveInput(inputPath)
+	if err != nil {
+		return err
 	}
 
 	// Dispatch to Pub/Sub handler if applicable.

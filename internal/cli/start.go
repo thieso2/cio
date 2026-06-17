@@ -31,17 +31,9 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-
-		if resolver.IsCloudSQLPath(path) {
-			fullPath = path
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
+		_, fullPath, _, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		if !resolver.IsCloudSQLPath(fullPath) {

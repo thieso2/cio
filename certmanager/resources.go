@@ -45,11 +45,11 @@ func (c *CertificateInfo) FormatLong() string {
 	if len(domains) > 60 {
 		domains = domains[:57] + "..."
 	}
-	return fmt.Sprintf("%-40s %-12s %-8s %-12s %s", c.Name, c.State, c.Type, expire, domains)
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", c.Name, c.State, c.Type, expire, domains)
 }
 
 func CertificateLongHeader() string {
-	return fmt.Sprintf("%-40s %-12s %-8s %-12s %s", "NAME", "STATE", "TYPE", "EXPIRES", "DOMAINS")
+	return "NAME\tSTATE\tTYPE\tEXPIRES\tDOMAINS"
 }
 
 // CertMapInfo holds information about a certificate map.
@@ -63,11 +63,11 @@ func (m *CertMapInfo) FormatShort() string { return m.Name }
 
 func (m *CertMapInfo) FormatLong() string {
 	created := m.Created.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %7d  %s", m.Name, m.Targets, created)
+	return fmt.Sprintf("%s\t%d\t%s", m.Name, m.Targets, created)
 }
 
 func CertMapLongHeader() string {
-	return fmt.Sprintf("%-55s %7s  %s", "NAME", "TARGETS", "CREATED")
+	return "NAME\tTARGETS\tCREATED"
 }
 
 // CertMapEntryInfo holds information about a certificate map entry.
@@ -86,11 +86,11 @@ func (e *CertMapEntryInfo) FormatLong() string {
 	if hostname == "" {
 		hostname = "(primary)"
 	}
-	return fmt.Sprintf("%-40s %-40s %-12s %s", e.Name, hostname, e.State, certs)
+	return fmt.Sprintf("%s\t%s\t%s\t%s", e.Name, hostname, e.State, certs)
 }
 
 func CertMapEntryLongHeader() string {
-	return fmt.Sprintf("%-40s %-40s %-12s %s", "NAME", "HOSTNAME", "STATE", "CERTIFICATES")
+	return "NAME\tHOSTNAME\tSTATE\tCERTIFICATES"
 }
 
 // ListCertificates lists all certificates in a project.

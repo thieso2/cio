@@ -34,18 +34,18 @@ type JobInfo struct {
 
 // FormatShort returns a short one-line representation.
 func (j *JobInfo) FormatShort() string {
-	return fmt.Sprintf("%-50s %s", j.Name, j.ID)
+	return fmt.Sprintf("%s\t%s", j.Name, j.ID)
 }
 
 // FormatLong returns a detailed one-line representation.
 func (j *JobInfo) FormatLong() string {
 	created := j.Created.In(time.Local).Format("2006-01-02 15:04")
-	return fmt.Sprintf("%-12s %-50s %-8s %s  %s", j.State, j.Name, j.Type, created, j.ID)
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", j.State, j.Name, j.Type, created, j.ID)
 }
 
 // JobLongHeader returns the header line for long format listing.
 func JobLongHeader() string {
-	return fmt.Sprintf("%-12s %-50s %-8s %-17s  %s", "STATE", "NAME", "TYPE", "CREATED", "JOB_ID")
+	return "STATE\tNAME\tTYPE\tCREATED\tJOB_ID"
 }
 
 // ListJobs lists Dataflow jobs in the given project and region.

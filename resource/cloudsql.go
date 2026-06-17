@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/thieso2/cio/cloudsql"
@@ -109,14 +108,8 @@ func (r *CloudSQLResource) Remove(ctx context.Context, path string, opts *Remove
 		return r.removeMatching(ctx, project, name, opts)
 	}
 
-	if opts == nil || !opts.Force {
-		fmt.Printf("Delete Cloud SQL instance %s? (y/N): ", name)
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete Cloud SQL instance %s? (y/N): ", name)) {
+		return nil
 	}
 
 	start := time.Now()
@@ -151,41 +144,16 @@ func (r *CloudSQLResource) removeMatching(ctx context.Context, project, pattern 
 	}
 	fmt.Println()
 
-	if opts == nil || !opts.Force {
-		fmt.Printf("Delete all %d instance(s)? (y/N): ", len(matched))
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete all %d instance(s)? (y/N): ", len(matched))) {
+		return nil
 	}
 
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-
-	for _, inst := range matched {
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			start := time.Now()
-			err := cloudsql.DeleteInstance(ctx, project, name)
-			elapsed := time.Since(start).Round(time.Millisecond)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				fmt.Printf("Failed: %s (%v)\n", name, err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				fmt.Printf("Deleted: %s (took %s)\n", name, elapsed)
-			}
-		}(inst.Name)
-	}
-	wg.Wait()
-	return firstErr
+	return bulkRun(ctx, matched,
+		func(i *cloudsql.InstanceInfo) string { return i.Name },
+		"Deleted",
+		func(ctx context.Context, i *cloudsql.InstanceInfo) error {
+			return cloudsql.DeleteInstance(ctx, project, i.Name)
+		})
 }
 
 // InfoWithProject returns detailed info about a Cloud SQL instance.
@@ -274,14 +242,8 @@ func StopCloudSQLInstances(ctx context.Context, project string, instances []*clo
 	}
 	fmt.Println()
 
-	if !force {
-		fmt.Printf("Stop all %d instance(s)? (y/N): ", len(toStop))
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if !confirm(force, fmt.Sprintf("Stop all %d instance(s)? (y/N): ", len(toStop))) {
+		return nil
 	}
 
 	return parallelCloudSQL(ctx, project, toStop, "Stopped", cloudsql.StopInstance)
@@ -307,43 +269,18 @@ func StartCloudSQLInstances(ctx context.Context, project string, instances []*cl
 	}
 	fmt.Println()
 
-	if !force {
-		fmt.Printf("Start all %d instance(s)? (y/N): ", len(toStart))
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if !confirm(force, fmt.Sprintf("Start all %d instance(s)? (y/N): ", len(toStart))) {
+		return nil
 	}
 
 	return parallelCloudSQL(ctx, project, toStart, "Started", cloudsql.StartInstance)
 }
 
 func parallelCloudSQL(ctx context.Context, project string, instances []*cloudsql.InstanceInfo, verb string, action func(context.Context, string, string) error) error {
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-
-	for _, inst := range instances {
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			start := time.Now()
-			err := action(ctx, project, name)
-			elapsed := time.Since(start).Round(time.Millisecond)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				fmt.Printf("Failed: %s (%v)\n", name, err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				fmt.Printf("%s: %s (took %s)\n", verb, name, elapsed)
-			}
-		}(inst.Name)
-	}
-	wg.Wait()
-	return firstErr
+	return bulkRun(ctx, instances,
+		func(i *cloudsql.InstanceInfo) string { return i.Name },
+		verb,
+		func(ctx context.Context, i *cloudsql.InstanceInfo) error {
+			return action(ctx, project, i.Name)
+		})
 }

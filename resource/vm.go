@@ -28,7 +28,7 @@ func (r *VMResource) Type() Type { return TypeVM }
 
 func (r *VMResource) FormatLongHeader() string {
 	if r.listingMode == "zones" {
-		return fmt.Sprintf("%-30s %s", "ZONE", "INSTANCES")
+		return "ZONE\tINSTANCES"
 	}
 	return compute.InstanceLongHeader()
 }
@@ -167,7 +167,7 @@ func (z *zoneInfo) FormatShort() string {
 
 // FormatLong renders a zone as a long listing row.
 func (z *zoneInfo) FormatLong() string {
-	return fmt.Sprintf("%-30s %d", z.Name, z.InstanceCount)
+	return fmt.Sprintf("%s\t%d", z.Name, z.InstanceCount)
 }
 
 // MatchVMInstances resolves a vm:// path to matching instances.

@@ -36,7 +36,7 @@ func (d *DatabaseInfo) FormatShort() string { return d.Name }
 
 // FormatLong renders a database as a long listing row.
 func (d *DatabaseInfo) FormatLong() string {
-	return fmt.Sprintf("%-55s %s", d.Name, d.Charset)
+	return fmt.Sprintf("%s\t%s", d.Name, d.Charset)
 }
 
 func instanceInfoFrom(inst *sqladmin.DatabaseInstance) *InstanceInfo {
@@ -95,14 +95,13 @@ func (i *InstanceInfo) FormatLong() string {
 	if i.AvailabilityType == "REGIONAL" {
 		ha = "HA"
 	}
-	return fmt.Sprintf("%-55s %-12s %-8s %-20s %-12s %-16s %-6s %s",
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
 		i.Name, i.State, i.DatabaseVersion, i.Tier, i.Region, ip, ha, created)
 }
 
 // InstanceLongHeader returns the header for long instance listing.
 func InstanceLongHeader() string {
-	return fmt.Sprintf("%-55s %-12s %-8s %-20s %-12s %-16s %-6s %s",
-		"NAME", "STATE", "VERSION", "TIER", "REGION", "IP", "HA", "CREATED")
+	return "NAME\tSTATE\tVERSION\tTIER\tREGION\tIP\tHA\tCREATED"
 }
 
 // FormatDetailed formats an instance with full details.

@@ -223,7 +223,10 @@ graph TB
   their own `IsXPath || ...` subset (which had drifted into three divergent lists).
 - `resolveToResource()` / `resolveInput()` (`internal/cli/input.go`) - the shared
   command prelude: alias resolution + direct-path detection + factory + handler.
-  `ls`/`rm`/`info` open with one call instead of a copy-pasted ~16-line block.
+  **Every** command opens through it now — `ls`/`rm`/`info` via `resolveToResource`,
+  and `cat`/`du`/`cp`/`scale`/`stop`/`start`/`cancel`/`tail` via `resolveInput`
+  (which only needs the path) — instead of each hand-rolling
+  `resolver.Create + IsXPath + Resolve`.
 - `ResourceInfo` - unified data structure for resource metadata
 - Benefits:
   - Single codebase for all resource types
@@ -249,6 +252,32 @@ graph TB
   `forEachDiscoveredProject(scheme, pattern, rest, fn)`. `ls`/`stop`/`cancel`
   pass their one varying step as a callback; `rm` uses `discoverProjects` for its
   two-pass collect → confirm → delete.
+- **`internal/cli/table.go` — one table renderer.** `renderTable(header, rows, indent)`
+  feeds tab-separated cells through `text/tabwriter`, sizing every column to its
+  data. All `*Info` `FormatShort/FormatLong` methods (and their `FormatLongHeader`s)
+  emit `'\t'`-separated cells with **no** fixed widths — so listings stay tidy
+  regardless of value length and the header can't drift from the rows. `ls` (main,
+  discover, Pub/Sub sections) collects rows then renders once. Cost keeps its own
+  adaptive path (right-aligned money, dynamic label width, total row). A row with
+  no tabs is a single column and prints unchanged (e.g. GCS object listings, which
+  keep their Unix `ls -l` size/timestamp style).
+- **`resource/bulk.go` — one bulk-mutation engine.** `bulkRun[T](ctx, items, name,
+  verb, action)` owns the goroutine + mutex + WaitGroup + per-item timing +
+  first-error fan-out; `confirm(force, prompt)` owns the y/N + "Aborted." gate.
+  Cloud SQL / Cloud Run / Pub/Sub remove/stop/start/cancel supply only the per-item
+  action closure and a preview, replacing ~100 lines of copy-pasted concurrency.
+- **`resolver` scheme table.** A single ordered `schemes` table (predicate →
+  `joinStyle`) drives `IsDirectPath` (is this a full path?), the alias join in
+  `Resolve`, and the reverse join in `ReverseResolve` — three lists that had
+  drifted apart are now one. The `IsXPath` predicates still own the prefix strings
+  (and the `resource/factory.go` registry keys off them).
+- **`internal/fuse/node_attr.go` — FUSE attribute defaults.** `fillDirAttr(out)`
+  and `fillFileAttr(out, mode, size)` hold the directory (0755, uid/gid, Nlink=2)
+  and generated-file (mode, size, mtime=now, Nlink=1) attribute policy that ~30
+  `Getattr` methods had copy-pasted; each method is now one helper call (nodes with
+  genuinely custom attrs — `TableNode` row counts, `ObjectNode` real timestamps —
+  stay bespoke). The GCS/BQ IAM-policy node *types* remain separate (parametrizing
+  them is a follow-up that needs a live mount to verify).
 
 **1. Alias Resolution Flow (`internal/resolver/`)**
 - `Resolver` converts alias paths (with `:` prefix) to full paths using config mappings

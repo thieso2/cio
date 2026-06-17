@@ -299,14 +299,8 @@ func (r *PubSubResource) removeTopic(ctx context.Context, project, name string, 
 		fmt.Println()
 	}
 
-	if opts == nil || !opts.Force {
-		fmt.Printf("Delete topic %s? (y/N): ", name)
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete topic %s? (y/N): ", name)) {
+		return nil
 	}
 
 	if err := pubsub.DeleteTopic(ctx, project, name); err != nil {
@@ -317,14 +311,8 @@ func (r *PubSubResource) removeTopic(ctx context.Context, project, name string, 
 }
 
 func (r *PubSubResource) removeSub(ctx context.Context, project, name string, opts *RemoveOptions) error {
-	if opts == nil || !opts.Force {
-		fmt.Printf("Delete subscription %s? (y/N): ", name)
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete subscription %s? (y/N): ", name)) {
+		return nil
 	}
 
 	if err := pubsub.DeleteSubscription(ctx, project, name); err != nil {
@@ -374,14 +362,8 @@ func (r *PubSubResource) removeWithWildcard(ctx context.Context, project, resTyp
 	}
 	fmt.Println()
 
-	if opts == nil || !opts.Force {
-		fmt.Printf("Delete all %d %s? (y/N): ", len(items), resourceWord)
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete all %d %s? (y/N): ", len(items), resourceWord)) {
+		return nil
 	}
 
 	for _, name := range items {

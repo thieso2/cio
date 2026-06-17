@@ -85,10 +85,7 @@ func (n *IAMResourceTypeNode) Readdir(ctx context.Context) (fs.DirStream, syscal
 
 // Getattr returns attributes for the resource type directory
 func (n *IAMResourceTypeNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -137,10 +134,7 @@ func (n *ServiceAccountNode) Readdir(ctx context.Context) (fs.DirStream, syscall
 
 // Getattr returns attributes for the service account directory
 func (n *ServiceAccountNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -364,10 +358,7 @@ func (n *ServiceAccountKeysDirectoryNode) Readdir(ctx context.Context) (fs.DirSt
 }
 
 func (n *ServiceAccountKeysDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -425,12 +416,7 @@ func (n *ServiceAccountKeyFileNode) Getattr(ctx context.Context, f fs.FileHandle
 		return MapGCPError(err)
 	}
 
-	out.Mode = 0444 | fuse.S_IFREG
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0444|fuse.S_IFREG, len(content))
 	return 0
 }
 
@@ -479,13 +465,13 @@ func (n *ServiceAccountKeyFileNode) generateContent(ctx context.Context) ([]byte
 
 		// Format as JSON
 		data := map[string]interface{}{
-			"name":               targetKey.Name,
-			"key_id":             targetKey.KeyID,
-			"key_type":           targetKey.KeyType,
-			"key_algorithm":      targetKey.KeyAlgorithm,
-			"valid_after_time":   targetKey.ValidAfterTime.Format(time.RFC3339),
-			"valid_before_time":  targetKey.ValidBeforeTime.Format(time.RFC3339),
-			"disabled":           targetKey.Disabled,
+			"name":              targetKey.Name,
+			"key_id":            targetKey.KeyID,
+			"key_type":          targetKey.KeyType,
+			"key_algorithm":     targetKey.KeyAlgorithm,
+			"valid_after_time":  targetKey.ValidAfterTime.Format(time.RFC3339),
+			"valid_before_time": targetKey.ValidBeforeTime.Format(time.RFC3339),
+			"disabled":          targetKey.Disabled,
 		}
 
 		logGC("IAM:GetKey", apiStart, n.projectID, n.email, n.keyID)
@@ -570,10 +556,7 @@ func (n *ServiceAccountUsageDirectoryNode) Readdir(ctx context.Context) (fs.DirS
 }
 
 func (n *ServiceAccountUsageDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -634,12 +617,7 @@ The usage/ directory will show:
 For now, this feature returns an empty directory.
 `
 
-	out.Mode = 0444 | fuse.S_IFREG
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
+	fillFileAttr(out, 0444|fuse.S_IFREG, len(content))
 	return 0
 }
 
@@ -724,9 +702,6 @@ func (n *ServiceAccountUsageTypeDirectoryNode) Readdir(ctx context.Context) (fs.
 }
 
 func (n *ServiceAccountUsageTypeDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }

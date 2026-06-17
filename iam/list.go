@@ -40,7 +40,7 @@ func (sa *ServiceAccountInfo) FormatLong() string {
 		displayName = "-"
 	}
 
-	return fmt.Sprintf("%-60s %-30s %s", sa.Email, displayName, disabled)
+	return fmt.Sprintf("%s\t%s\t%s", sa.Email, displayName, disabled)
 }
 
 // FormatDetailed formats service account info with all details.
@@ -123,7 +123,7 @@ func GetServiceAccount(ctx context.Context, projectID, accountEmail string) (*Se
 
 // FormatHeader returns the header for long format listing.
 func FormatHeader() string {
-	return fmt.Sprintf("%-60s %-30s %s", "EMAIL", "DISPLAY_NAME", "DISABLED")
+	return "EMAIL\tDISPLAY_NAME\tDISABLED"
 }
 
 // ParseIAMPath parses an IAM path and returns the project ID and resource type.

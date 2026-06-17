@@ -13,12 +13,12 @@ import (
 
 // TopicInfo holds information about a Pub/Sub topic.
 type TopicInfo struct {
-	Name              string            `json:"name"`
-	Project           string            `json:"project"`
-	SubscriptionCount int               `json:"subscription_count"`
-	Retention         time.Duration     `json:"retention,omitempty"`
-	Labels            map[string]string `json:"labels,omitempty"`
-	KMSKeyName        string            `json:"kms_key_name,omitempty"`
+	Name              string                 `json:"name"`
+	Project           string                 `json:"project"`
+	SubscriptionCount int                    `json:"subscription_count"`
+	Retention         time.Duration          `json:"retention,omitempty"`
+	Labels            map[string]string      `json:"labels,omitempty"`
+	KMSKeyName        string                 `json:"kms_key_name,omitempty"`
 	SchemaSettings    *pubsub.SchemaSettings `json:"schema_settings,omitempty"`
 }
 
@@ -34,12 +34,12 @@ func (t *TopicInfo) FormatLong() string {
 		retention = formatDuration(t.Retention)
 	}
 	labels := formatLabels(t.Labels)
-	return fmt.Sprintf("%-50s %4d  %10s  %s", t.Name, t.SubscriptionCount, retention, labels)
+	return fmt.Sprintf("%s\t%d\t%s\t%s", t.Name, t.SubscriptionCount, retention, labels)
 }
 
 // TopicLongHeader returns the header for long topic listing.
 func TopicLongHeader() string {
-	return fmt.Sprintf("%-50s %4s  %10s  %s", "NAME", "SUBS", "RETENTION", "LABELS")
+	return "NAME\tSUBS\tRETENTION\tLABELS"
 }
 
 // SubscriptionInfo holds information about a Pub/Sub subscription.
@@ -83,12 +83,12 @@ func (s *SubscriptionInfo) FormatLong() string {
 		}
 	}
 
-	return fmt.Sprintf("%-50s %-40s %-6s %5s  %10s  %8s", s.Name, topicShort, s.Type, ackDeadline, undelivered, oldest)
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s", s.Name, topicShort, s.Type, ackDeadline, undelivered, oldest)
 }
 
 // SubscriptionLongHeader returns the header for long subscription listing.
 func SubscriptionLongHeader() string {
-	return fmt.Sprintf("%-50s %-40s %-6s %5s  %10s  %8s", "NAME", "TOPIC", "TYPE", "ACK", "UNDELIVERED", "OLDEST")
+	return "NAME\tTOPIC\tTYPE\tACK\tUNDELIVERED\tOLDEST"
 }
 
 // ListTopics lists all topics in the project.

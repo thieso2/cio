@@ -29,11 +29,11 @@ func (p *ProjectInfo) FormatShort() string {
 
 func (p *ProjectInfo) FormatLong() string {
 	created := p.Created.Format("2006-01-02")
-	return fmt.Sprintf("%-40s %-40s %s", p.ProjectID, p.DisplayName, created)
+	return fmt.Sprintf("%s\t%s\t%s", p.ProjectID, p.DisplayName, created)
 }
 
 func ProjectsLongHeader() string {
-	return fmt.Sprintf("%-40s %-40s %s", "PROJECT ID", "NAME", "CREATED")
+	return "PROJECT ID\tNAME\tCREATED"
 }
 
 // ProjectsResource implements Resource for GCP projects

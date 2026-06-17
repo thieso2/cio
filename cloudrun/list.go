@@ -386,7 +386,7 @@ func (s *ServiceInfo) FormatServiceLong() string {
 	if uri == "" {
 		uri = "-"
 	}
-	return fmt.Sprintf("%-55s %-12s %-20s %s", s.Name, s.Status, updated, uri)
+	return fmt.Sprintf("%s\t%s\t%s\t%s", s.Name, s.Status, updated, uri)
 }
 
 // FormatShort formats a job in short format.
@@ -395,7 +395,7 @@ func (j *JobInfo) FormatShort() string { return j.Name }
 // FormatJobLong formats a job in long format.
 func (j *JobInfo) FormatJobLong() string {
 	updated := j.Updated.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %-12s %7d %7d  %s", j.Name, j.Status, j.ActiveExecs, j.ExecutionCount, updated)
+	return fmt.Sprintf("%s\t%s\t%d\t%d\t%s", j.Name, j.Status, j.ActiveExecs, j.ExecutionCount, updated)
 }
 
 // FormatShort formats an execution in short format.
@@ -411,7 +411,7 @@ func (e *ExecutionInfo) FormatExecutionLong() string {
 	if !e.EndTime.IsZero() {
 		end = e.EndTime.Format("2006-01-02 15:04:05")
 	}
-	return fmt.Sprintf("%-50s %-12s %-20s %-20s %3d/%3d",
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%d/%d",
 		e.Name, e.Status, start, end, e.Succeeded, e.Failed)
 }
 
@@ -421,7 +421,7 @@ func (w *WorkerPoolInfo) FormatShort() string { return w.Name }
 // FormatWorkerPoolLong formats a worker pool in long format.
 func (w *WorkerPoolInfo) FormatWorkerPoolLong() string {
 	updated := w.Updated.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %-12s %10d  %s", w.Name, w.Status, w.InstanceCount, updated)
+	return fmt.Sprintf("%s\t%s\t%d\t%s", w.Name, w.Status, w.InstanceCount, updated)
 }
 
 // FormatLong adapters let each *Info satisfy resource.RowFormatter so the
@@ -433,22 +433,22 @@ func (w *WorkerPoolInfo) FormatLong() string { return w.FormatWorkerPoolLong() }
 
 // ServiceLongHeader returns the header for long service listing.
 func ServiceLongHeader() string {
-	return fmt.Sprintf("%-55s %-12s %-20s %s", "NAME", "STATUS", "UPDATED", "URL")
+	return "NAME\tSTATUS\tUPDATED\tURL"
 }
 
 // JobLongHeader returns the header for long job listing.
 func JobLongHeader() string {
-	return fmt.Sprintf("%-55s %-12s %7s %7s  %s", "NAME", "STATUS", "ACTIVE", "TOTAL", "UPDATED")
+	return "NAME\tSTATUS\tACTIVE\tTOTAL\tUPDATED"
 }
 
 // ExecutionLongHeader returns the header for long execution listing.
 func ExecutionLongHeader() string {
-	return fmt.Sprintf("%-50s %-12s %-20s %-20s %s", "NAME", "STATUS", "STARTED", "COMPLETED", "OK/FAIL")
+	return "NAME\tSTATUS\tSTARTED\tCOMPLETED\tOK/FAIL"
 }
 
 // WorkerPoolLongHeader returns the header for long worker pool listing.
 func WorkerPoolLongHeader() string {
-	return fmt.Sprintf("%-55s %-12s %10s  %s", "NAME", "STATUS", "INSTANCES", "UPDATED")
+	return "NAME\tSTATUS\tINSTANCES\tUPDATED"
 }
 
 // UpdateWorkerPoolInstances updates the manual instance count for a worker pool.

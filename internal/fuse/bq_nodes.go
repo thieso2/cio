@@ -133,10 +133,7 @@ func (n *DatasetNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno)
 
 // Getattr returns attributes for the dataset directory
 func (n *DatasetNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -186,7 +183,7 @@ var _ fs.NodeLookuper = (*TableNode)(nil)
 // Readdir lists virtual files in the table directory
 func (n *TableNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	entries := []fuse.DirEntry{
-		{Name: "schema.json", Mode: fuse.S_IFREG}, // Table schema as JSON
+		{Name: "schema.json", Mode: fuse.S_IFREG},   // Table schema as JSON
 		{Name: "metadata.json", Mode: fuse.S_IFREG}, // Table metadata
 	}
 	return fs.NewListDirStream(entries), 0
@@ -232,11 +229,7 @@ func (n *TableNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Attr
 		out.Blocks = (rowCount + 511) / 512 // Round up
 	}
 
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
-
+	fillDirAttr(out)
 	return 0
 }
 
@@ -381,11 +374,11 @@ func (n *TableMetaFileNode) Read(ctx context.Context, fh fs.FileHandle, dest []b
 func formatSchemaAsJSON(info *bigquery.BQObjectInfo) string {
 	// Convert schema to JSON-serializable format
 	type Field struct {
-		Name        string   `json:"name"`
-		Type        string   `json:"type"`
-		Mode        string   `json:"mode,omitempty"`
-		Description string   `json:"description,omitempty"`
-		Fields      []Field  `json:"fields,omitempty"` // For nested RECORD types
+		Name        string  `json:"name"`
+		Type        string  `json:"type"`
+		Mode        string  `json:"mode,omitempty"`
+		Description string  `json:"description,omitempty"`
+		Fields      []Field `json:"fields,omitempty"` // For nested RECORD types
 	}
 
 	var convertField func(*cloud_bigquery.FieldSchema) Field
@@ -506,10 +499,7 @@ func (n *BQMetaDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, syscal
 
 // Getattr returns attributes for the .meta directory
 func (n *BQMetaDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 | fuse.S_IFDIR
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 

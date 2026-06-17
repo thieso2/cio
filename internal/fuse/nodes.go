@@ -2,7 +2,6 @@ package fuse
 
 import (
 	"context"
-	"os"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -33,10 +32,7 @@ func (n *RootNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 // Getattr returns attributes for the root directory
 func (n *RootNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -99,10 +95,7 @@ func (n *ServiceNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno)
 
 // Getattr returns attributes for the service directory
 func (n *ServiceNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755 // Directory permissions
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 

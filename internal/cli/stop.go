@@ -43,17 +43,9 @@ Examples:
 			return runDiscoverStop(scheme, projectPattern, rest)
 		}
 
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-
-		if resolver.IsVMPath(path) || resolver.IsCloudSQLPath(path) {
-			fullPath = path
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
+		_, fullPath, _, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		ctx := context.Background()

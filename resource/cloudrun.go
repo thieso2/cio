@@ -6,8 +6,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/thieso2/cio/cloudrun"
 	"github.com/thieso2/cio/dataflow"
@@ -270,14 +268,8 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 				fmt.Printf("  - %s\n", job.Name)
 			}
 			fmt.Println()
-			if opts == nil || !opts.Force {
-				fmt.Printf("Delete all %d job(s)? (y/N): ", len(toDelete))
-				var response string
-				fmt.Scanln(&response)
-				if response != "y" && response != "Y" {
-					fmt.Println("Cancelled.")
-					return nil
-				}
+			if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete all %d job(s)? (y/N): ", len(toDelete))) {
+				return nil
 			}
 			for _, job := range toDelete {
 				if opts != nil && opts.Verbose {
@@ -293,14 +285,8 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 		}
 
 		// Single job deletion
-		if opts == nil || !opts.Force {
-			fmt.Printf("Delete job %s? (y/N): ", parsed.name)
-			var response string
-			fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
-				fmt.Println("Cancelled.")
-				return nil
-			}
+		if !confirm(opts != nil && opts.Force, fmt.Sprintf("Delete job %s? (y/N): ", parsed.name)) {
+			return nil
 		}
 		if err := cloudrun.DeleteJob(ctx, project, region, parsed.name); err != nil {
 			return err
@@ -311,14 +297,8 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 
 	// Single execution deletion
 	if parsed.execution != "*" && !strings.ContainsAny(parsed.execution, "*?") {
-		if opts == nil || !opts.Force {
-			fmt.Printf("Remove execution %s? (y/N): ", parsed.execution)
-			var response string
-			fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
-				fmt.Println("Cancelled.")
-				return nil
-			}
+		if !confirm(opts != nil && opts.Force, fmt.Sprintf("Remove execution %s? (y/N): ", parsed.execution)) {
+			return nil
 		}
 		if err := cloudrun.DeleteExecution(ctx, project, region, parsed.name, parsed.execution); err != nil {
 			return err
@@ -360,14 +340,8 @@ func (r *CloudRunResource) Remove(ctx context.Context, p string, opts *RemoveOpt
 	fmt.Println()
 
 	// Confirm unless force
-	if opts == nil || !opts.Force {
-		fmt.Printf("Remove all %d execution(s)? (y/N): ", len(toDelete))
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Remove all %d execution(s)? (y/N): ", len(toDelete))) {
+		return nil
 	}
 
 	// Delete executions
@@ -411,14 +385,8 @@ func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOpt
 
 	// Single execution cancellation
 	if parsed.execution != "*" && !strings.ContainsAny(parsed.execution, "*?") {
-		if opts == nil || !opts.Force {
-			fmt.Printf("Cancel execution %s? (y/N): ", parsed.execution)
-			var response string
-			fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
-				fmt.Println("Cancelled.")
-				return nil
-			}
+		if !confirm(opts != nil && opts.Force, fmt.Sprintf("Cancel execution %s? (y/N): ", parsed.execution)) {
+			return nil
 		}
 		if err := cloudrun.CancelExecution(ctx, project, region, parsed.name, parsed.execution); err != nil {
 			return err
@@ -457,43 +425,16 @@ func (r *CloudRunResource) Cancel(ctx context.Context, p string, opts *RemoveOpt
 	}
 	fmt.Println()
 
-	if opts == nil || !opts.Force {
-		fmt.Printf("Cancel all %d execution(s)? (y/N): ", len(toCancel))
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if !confirm(opts != nil && opts.Force, fmt.Sprintf("Cancel all %d execution(s)? (y/N): ", len(toCancel))) {
+		return nil
 	}
 
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
-
-	for _, exec := range toCancel {
-		wg.Add(1)
-		go func(e *cloudrun.ExecutionInfo) {
-			defer wg.Done()
-			start := time.Now()
-			err := cloudrun.CancelExecution(ctx, project, region, parsed.name, e.Name)
-			elapsed := time.Since(start).Round(time.Millisecond)
-
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				fmt.Printf("Failed: %s (%v)\n", e.Name, err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				fmt.Printf("Cancelled: %s (took %s)\n", e.Name, elapsed)
-			}
-		}(exec)
-	}
-	wg.Wait()
-
-	return firstErr
+	return bulkRun(ctx, toCancel,
+		func(e *cloudrun.ExecutionInfo) string { return e.Name },
+		"Cancelled",
+		func(ctx context.Context, e *cloudrun.ExecutionInfo) error {
+			return cloudrun.CancelExecution(ctx, project, region, parsed.name, e.Name)
+		})
 }
 
 // FormatShort formats resource info in short format.

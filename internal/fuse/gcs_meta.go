@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -87,10 +86,7 @@ func (n *MetaDirectoryNode) Readdir(ctx context.Context) (fs.DirStream, syscall.
 
 // Getattr returns attributes for the .meta directory
 func (n *MetaDirectoryNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 
@@ -179,13 +175,7 @@ func (n *BucketMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *
 		return MapGCPError(err)
 	}
 
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
-
+	fillFileAttr(out, 0644, len(content))
 	return 0
 }
 
@@ -283,13 +273,7 @@ func (n *ObjectMetaFileNode) Getattr(ctx context.Context, f fs.FileHandle, out *
 		return MapGCPError(err)
 	}
 
-	out.Mode = 0644
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Size = uint64(len(content))
-	out.Mtime = uint64(time.Now().Unix())
-	out.Nlink = 1
-
+	fillFileAttr(out, 0644, len(content))
 	return 0
 }
 

@@ -59,19 +59,9 @@ Note: parallelism is controlled by the global -j flag (default: 50).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
-		r := resolver.Create(cfg)
-		var fullPath string
-		var inputWasAlias bool
-
-		if resolver.IsGCSPath(path) {
-			fullPath = path
-		} else {
-			var err error
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
-			inputWasAlias = true
+		r, fullPath, inputWasAlias, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		if !resolver.IsGCSPath(fullPath) {

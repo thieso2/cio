@@ -25,7 +25,7 @@ type InstanceInfo struct {
 
 // FormatShort formats an instance in short format (zone/name).
 func (i *InstanceInfo) FormatShort() string {
-	return fmt.Sprintf("%-20s %s", shortZone(i.Zone), i.Name)
+	return fmt.Sprintf("%s\t%s", shortZone(i.Zone), i.Name)
 }
 
 // FormatLong formats an instance in long format.
@@ -40,12 +40,12 @@ func (i *InstanceInfo) FormatLong() string {
 	if ip == "" {
 		ip = "-"
 	}
-	return fmt.Sprintf("%-55s %-12s %-22s %-20s %-16s %s", i.Name, i.Status, machineType, zone, ip, created)
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s", i.Name, i.Status, machineType, zone, ip, created)
 }
 
 // InstanceLongHeader returns the header for long instance listing.
 func InstanceLongHeader() string {
-	return fmt.Sprintf("%-55s %-12s %-22s %-20s %-16s %s", "NAME", "STATUS", "MACHINE_TYPE", "ZONE", "IP", "CREATED")
+	return "NAME\tSTATUS\tMACHINE_TYPE\tZONE\tIP\tCREATED"
 }
 
 // shortZone extracts the zone name from a full zone URL.

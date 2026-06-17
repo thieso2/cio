@@ -29,16 +29,9 @@ Examples:
 			return fmt.Errorf("invalid instance count: %s", args[1])
 		}
 
-		r := resolver.Create(cfg)
-		var fullPath string
-
-		if resolver.IsWorkerPath(path) {
-			fullPath = path
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
+		_, fullPath, _, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		if !resolver.IsWorkerPath(fullPath) {

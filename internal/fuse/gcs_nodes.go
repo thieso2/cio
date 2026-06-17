@@ -48,11 +48,11 @@ type BucketNode struct {
 // ObjectNode represents a GCS object (file)
 type ObjectNode struct {
 	fs.Inode
-	bucketName   string
-	objectName   string
-	attrs        *storage.ObjectAttrs
-	readAhead    *ReadAheadBuffer
-	readAheadMu  sync.Mutex
+	bucketName  string
+	objectName  string
+	attrs       *storage.ObjectAttrs
+	readAhead   *ReadAheadBuffer
+	readAheadMu sync.Mutex
 }
 
 var _ fs.NodeReaddirer = (*BucketNode)(nil)
@@ -126,10 +126,7 @@ func (n *BucketNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 // Getattr returns attributes for the bucket directory
 func (n *BucketNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	out.Mode = 0755
-	out.Uid = uint32(os.Getuid())
-	out.Gid = uint32(os.Getgid())
-	out.Nlink = 2
+	fillDirAttr(out)
 	return 0
 }
 

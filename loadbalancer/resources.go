@@ -37,11 +37,11 @@ func (u *UrlMapInfo) FormatShort() string { return u.Name }
 
 func (u *UrlMapInfo) FormatLong() string {
 	created := u.Created.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %-40s %5d  %s", u.Name, u.DefaultService, u.HostRuleCount, created)
+	return fmt.Sprintf("%s\t%s\t%d\t%s", u.Name, u.DefaultService, u.HostRuleCount, created)
 }
 
 func UrlMapLongHeader() string {
-	return fmt.Sprintf("%-55s %-40s %5s  %s", "NAME", "DEFAULT SERVICE", "HOSTS", "CREATED")
+	return "NAME\tDEFAULT SERVICE\tHOSTS\tCREATED"
 }
 
 // ForwardingRuleInfo holds information about a forwarding rule.
@@ -59,13 +59,12 @@ func (f *ForwardingRuleInfo) FormatShort() string { return f.Name }
 
 func (f *ForwardingRuleInfo) FormatLong() string {
 	created := f.Created.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %-16s %-6s %-12s %-20s %s",
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s",
 		f.Name, f.IPAddress, f.Protocol, f.PortRange, f.LoadBalancingScheme, created)
 }
 
 func ForwardingRuleLongHeader() string {
-	return fmt.Sprintf("%-55s %-16s %-6s %-12s %-20s %s",
-		"NAME", "IP", "PROTO", "PORTS", "SCHEME", "CREATED")
+	return "NAME\tIP\tPROTO\tPORTS\tSCHEME\tCREATED"
 }
 
 // BackendServiceInfo holds information about a backend service.
@@ -81,13 +80,12 @@ func (b *BackendServiceInfo) FormatShort() string { return b.Name }
 
 func (b *BackendServiceInfo) FormatLong() string {
 	created := b.Created.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%-55s %-8s %8d %8d  %s",
+	return fmt.Sprintf("%s\t%s\t%d\t%d\t%s",
 		b.Name, b.Protocol, b.BackendCount, b.TimeoutSec, created)
 }
 
 func BackendServiceLongHeader() string {
-	return fmt.Sprintf("%-55s %-8s %8s %8s  %s",
-		"NAME", "PROTOCOL", "BACKENDS", "TIMEOUT", "CREATED")
+	return "NAME\tPROTOCOL\tBACKENDS\tTIMEOUT\tCREATED"
 }
 
 // ListUrlMaps lists all URL maps in a project.

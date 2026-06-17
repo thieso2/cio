@@ -37,8 +37,6 @@ func init() {
 func runCat(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	r := resolver.Create(cfg)
-
 	client, err := storage.GetClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create GCS client: %w", err)
@@ -46,14 +44,9 @@ func runCat(cmd *cobra.Command, args []string) error {
 
 	for _, arg := range args {
 		// Resolve alias or use path as-is
-		var fullPath string
-		if resolver.IsGCSPath(arg) {
-			fullPath = arg
-		} else {
-			fullPath, err = r.Resolve(arg)
-			if err != nil {
-				return fmt.Errorf("failed to resolve %q: %w", arg, err)
-			}
+		_, fullPath, _, err := resolveInput(arg)
+		if err != nil {
+			return fmt.Errorf("failed to resolve %q: %w", arg, err)
 		}
 
 		bucket, object, err := resolver.ParseGCSPath(fullPath)

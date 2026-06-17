@@ -45,17 +45,9 @@ Examples:
 			return runDiscoverCancel(projectPattern, rest)
 		}
 
-		r := resolver.Create(cfg)
-		var fullPath string
-		var err error
-
-		if resolver.IsCloudRunPath(path) {
-			fullPath = path
-		} else {
-			fullPath, err = r.Resolve(path)
-			if err != nil {
-				return err
-			}
+		r, fullPath, _, err := resolveInput(path)
+		if err != nil {
+			return err
 		}
 
 		if !resolver.IsJobsPath(fullPath) {
