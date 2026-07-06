@@ -13,11 +13,14 @@ import (
 var stopForce bool
 
 var stopCmd = &cobra.Command{
-	Use:   "stop <path>",
-	Short: "Stop VM or Cloud SQL instances",
-	Long: `Stop one or more Compute Engine VM or Cloud SQL instances.
+	Use:     "stop <path>",
+	Aliases: []string{"disable", "pause"},
+	Short:   "Stop VM/Cloud SQL instances or disable Cloud Scheduler jobs",
+	Long: `Stop one or more Compute Engine VM or Cloud SQL instances, or pause
+(disable) Cloud Scheduler jobs.
 
-Running instances are stopped in parallel. Already-stopped instances are skipped.
+Instances/jobs are processed in parallel. Already-stopped instances and
+already-paused jobs are skipped. 'disable' and 'pause' are aliases for stop.
 
 Examples:
   # Stop a VM instance
@@ -31,6 +34,13 @@ Examples:
 
   # Stop Cloud SQL instances matching a pattern
   cio stop 'sql://staging-*'
+
+  # Disable (pause) a Cloud Scheduler job
+  cio stop scheduler://my-job
+  cio disable scheduler://my-job
+
+  # Disable scheduler jobs matching a pattern
+  cio disable 'scheduler://nightly-*'
 
   # Force stop without confirmation
   cio stop -f sql://my-instance`,
@@ -50,6 +60,14 @@ Examples:
 
 		ctx := context.Background()
 
+		if resolver.IsSchedulerPath(fullPath) {
+			matched, err := resource.MatchSchedulerJobs(ctx, fullPath, cfg.Defaults.ProjectID, cfg.Defaults.Region)
+			if err != nil {
+				return err
+			}
+			return resource.PauseSchedulerJobs(ctx, cfg.Defaults.ProjectID, cfg.Defaults.Region, matched, stopForce)
+		}
+
 		if resolver.IsCloudSQLPath(fullPath) {
 			matched, err := resource.MatchCloudSQLInstances(ctx, fullPath, cfg.Defaults.ProjectID)
 			if err != nil {
@@ -66,7 +84,7 @@ Examples:
 			return resource.StopVMInstances(ctx, cfg.Defaults.ProjectID, matched, stopForce)
 		}
 
-		return fmt.Errorf("stop supports VM (vm://) and Cloud SQL (sql://) paths, got: %s", fullPath)
+		return fmt.Errorf("stop supports VM (vm://), Cloud SQL (sql://), and Cloud Scheduler (scheduler://) paths, got: %s", fullPath)
 	},
 }
 
@@ -74,6 +92,8 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 	ctx := context.Background()
 
 	return forEachDiscoveredProject(ctx, scheme, projectPattern, rest, func(projectID, resourcePath string) error {
+		// Names must stay raw here — the stop/pause API calls use them. Project
+		// context comes from a header line instead of prefixing each name.
 		switch scheme {
 		case "vm":
 			matched, err := resource.MatchVMInstances(ctx, resourcePath, projectID)
@@ -86,10 +106,7 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 			if len(matched) == 0 {
 				return nil
 			}
-			// Prefix names for display
-			for _, m := range matched {
-				m.Name = scheme + ":/" + projectID + "/" + m.Name
-			}
+			fmt.Printf("Project %s:\n", projectID)
 			if err := resource.StopVMInstances(ctx, projectID, matched, stopForce); err != nil {
 				fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
 			}
@@ -104,10 +121,23 @@ func runDiscoverStop(scheme, projectPattern, rest string) error {
 			if len(matched) == 0 {
 				return nil
 			}
-			for _, m := range matched {
-				m.Name = scheme + ":/" + projectID + "/" + m.Name
-			}
+			fmt.Printf("Project %s:\n", projectID)
 			if err := resource.StopCloudSQLInstances(ctx, projectID, matched, stopForce); err != nil {
+				fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
+			}
+		case "scheduler":
+			matched, err := resource.MatchSchedulerJobs(ctx, resourcePath, projectID, cfg.Defaults.Region)
+			if err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Warning: %s: %v\n", projectID, err)
+				}
+				return nil
+			}
+			if len(matched) == 0 {
+				return nil
+			}
+			fmt.Printf("Project %s:\n", projectID)
+			if err := resource.PauseSchedulerJobs(ctx, projectID, cfg.Defaults.Region, matched, stopForce); err != nil {
 				fmt.Fprintf(os.Stderr, "Error in %s: %v\n", projectID, err)
 			}
 		default:

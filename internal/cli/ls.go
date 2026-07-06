@@ -99,6 +99,19 @@ Examples (VM):
   # Long format with status, machine type, IP
   cio ls -l vm://europe-west3-a
 
+Examples (Cloud Scheduler):
+  # List all scheduler jobs (region from config/--region)
+  cio ls scheduler://
+
+  # Long format with state, schedule, next/last run, target
+  cio ls -l scheduler://
+
+  # Wildcard pattern
+  cio ls 'scheduler://nightly-*'
+
+  # Only enabled (active) jobs
+  cio ls --active scheduler://
+
 Examples (Pub/Sub):
   # List all topics and subscriptions
   cio ls pubsub://
@@ -481,7 +494,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsRaw, "raw", false, "output only resource names, one per line (useful for scripting)")
 	lsCmd.Flags().BoolVarP(&lsSortBySize, "sort-size", "S", false, "sort by size (largest first)")
 	lsCmd.Flags().BoolVarP(&lsSortByTime, "sort-time", "t", false, "sort by modification time (newest first)")
-	lsCmd.Flags().BoolVar(&lsActiveOnly, "active", false, "show only active jobs (Dataflow)")
+	lsCmd.Flags().BoolVar(&lsActiveOnly, "active", false, "show only active jobs (Dataflow, Cloud Scheduler)")
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "show all statuses (include completed/failed executions)")
 	lsCmd.Flags().StringVar(&lsMonth, "month", "", "billing month (YYYY-MM or YYYYMM, default: current month)")
 	lsCmd.Flags().StringVar(&lsSort, "sort", "", "sort order for cost output (cost = by cost descending)")

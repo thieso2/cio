@@ -36,6 +36,7 @@ func newResourceFactory(r *resolver.Resolver, wasAlias bool) *resource.Factory {
 	}
 	factory := resource.CreateFactory(formatter)
 	factory.BillingTable = cfg.Billing.Table
+	factory.Region = cfg.Defaults.Region
 	return factory
 }
 

@@ -18,8 +18,8 @@ var (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <path>",
-	Short: "Remove objects from GCS, BigQuery, Cloud Run, Compute Engine, or Pub/Sub",
-	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, Cloud Run job executions, VM instances, or Pub/Sub topics/subscriptions.
+	Short: "Remove objects from GCS, BigQuery, Cloud Run, Compute Engine, Pub/Sub, or Projects",
+	Long: `Remove objects from Google Cloud Storage, BigQuery tables/datasets, Cloud Run job executions, VM instances, Pub/Sub topics/subscriptions, or GCP projects.
 
 Examples (GCS):
   cio rm :am/2024/data.csv
@@ -76,7 +76,15 @@ Examples (Pub/Sub):
   # Force delete without confirmation
   cio rm -f pubsub://subs/test-sub
 
-CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot be recovered.`,
+Examples (Projects):
+  # Delete a GCP project (soft delete: shut down now, purged after ~30 days)
+  cio rm project://my-project-id
+
+  # Delete projects matching a pattern (lists matches, asks for confirmation)
+  cio rm 'projects://staging-*'
+
+CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot be recovered.
+Project deletion is a soft delete: recoverable for ~30 days, but the project shuts down immediately.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
@@ -94,8 +102,8 @@ CAUTION: Deleted objects, tables, executions, VMs, and Pub/Sub resources cannot 
 
 		ctx := context.Background()
 
-		// Cloud Run, VM, and Pub/Sub handle their own listing/confirmation in Remove
-		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) || resolver.IsCloudSQLPath(fullPath) {
+		// Cloud Run, VM, Pub/Sub, Cloud SQL, and Projects handle their own listing/confirmation in Remove
+		if resolver.IsCloudRunPath(fullPath) || resolver.IsVMPath(fullPath) || resolver.IsPubSubPath(fullPath) || resolver.IsCloudSQLPath(fullPath) || resolver.IsProjectsPath(fullPath) {
 			options := &resource.RemoveOptions{
 				Force:   rmForce,
 				Verbose: verbose,

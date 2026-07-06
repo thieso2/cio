@@ -10,6 +10,7 @@ import (
 type Factory struct {
 	formatter    PathFormatter
 	BillingTable string // BigQuery billing export table for cost:// paths
+	Region       string // default region for regional resources (scheduler://)
 }
 
 // CreateFactory creates a new resource factory
@@ -38,6 +39,7 @@ var registry = []schemeEntry{
 	{resolver.IsVMPath, func(f *Factory) Resource { return CreateVMResource(f.formatter) }},
 	{resolver.IsPubSubPath, func(f *Factory) Resource { return CreatePubSubResource(f.formatter) }},
 	{resolver.IsCloudSQLPath, func(f *Factory) Resource { return CreateCloudSQLResource(f.formatter) }},
+	{resolver.IsSchedulerPath, func(f *Factory) Resource { return CreateSchedulerResource(f.formatter, f.Region) }},
 	{resolver.IsLoadBalancerPath, func(f *Factory) Resource { return CreateLoadBalancerResource(f.formatter) }},
 	{resolver.IsCertManagerPath, func(f *Factory) Resource { return CreateCertManagerResource(f.formatter) }},
 	{resolver.IsProjectsPath, func(f *Factory) Resource { return CreateProjectsResource(f.formatter) }},

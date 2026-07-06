@@ -18,7 +18,8 @@ var infoCmd = &cobra.Command{
 	Short: "Show detailed information about resources",
 	Long: `Display detailed information about resources including schema, size, metadata, and dependency graphs.
 
-Supports BigQuery tables/views and Pub/Sub topics/subscriptions. GCS objects should use 'ls -l' instead.
+Supports BigQuery tables/views, Pub/Sub topics/subscriptions, Cloud SQL instances,
+Cloud Scheduler jobs, and GCP projects. GCS objects should use 'ls -l' instead.
 Supports wildcards: cio info 'bq://project.dataset.v_*'
 
 Examples:
@@ -26,7 +27,9 @@ Examples:
   cio info bq://my-project-id.my-dataset.my-table
   cio info 'bq://my-project-id.my-dataset.v_*'
   cio info --json :mydata.events
-  cio info pubsub://topics/my-topic`,
+  cio info pubsub://topics/my-topic
+  cio info scheduler://my-job
+  cio info project://my-project-id`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]

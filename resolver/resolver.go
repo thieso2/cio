@@ -46,6 +46,7 @@ var schemes = []struct {
 	{IsVMPath, joinSlash},
 	{IsPubSubPath, joinSlash},
 	{IsCloudSQLPath, joinGCS},
+	{IsSchedulerPath, joinGCS},
 	{IsLoadBalancerPath, joinGCS},
 	{IsCertManagerPath, joinGCS},
 	{IsProjectsPath, joinGCS},
@@ -307,6 +308,11 @@ func IsCloudSQLPath(path string) bool {
 	return strings.HasPrefix(path, "sql://")
 }
 
+// IsSchedulerPath checks if a string is a Cloud Scheduler path
+func IsSchedulerPath(path string) bool {
+	return strings.HasPrefix(path, "scheduler://")
+}
+
 // IsLoadBalancerPath checks if a string is a load balancer path
 func IsLoadBalancerPath(path string) bool {
 	return strings.HasPrefix(path, "lb://")
@@ -317,9 +323,10 @@ func IsCertManagerPath(path string) bool {
 	return strings.HasPrefix(path, "certs://")
 }
 
-// IsProjectsPath checks if a string is a projects path
+// IsProjectsPath checks if a string is a projects path.
+// Both projects:// (list) and project:// (single) forms are accepted.
 func IsProjectsPath(path string) bool {
-	return strings.HasPrefix(path, "projects://")
+	return strings.HasPrefix(path, "projects://") || strings.HasPrefix(path, "project://")
 }
 
 // IsVMPath checks if a string is a VM (Compute Engine) path
