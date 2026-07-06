@@ -74,7 +74,10 @@ Examples:
   cio ls -l :am/2024/
 
   # List recursively with human-readable sizes
-  cio ls -lr --human-readable :am/2024/`,
+  cio ls -lr --human-readable :am/2024/
+
+Run 'cio help schemes' to list all resource schemes, or 'cio help <scheme>://'
+(e.g. 'cio help cost://') for the commands and examples a resource supports.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Enable verbose from env var as well as --verbose flag
 		if os.Getenv("VERBOSE") != "" {

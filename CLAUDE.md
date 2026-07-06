@@ -24,7 +24,8 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
   - Cloud SQL: `sql://`
   - Load Balancers: `lb://`
   - Certificate Manager: `certs://`
-  - Projects: `projects://`
+  - Cloud Scheduler: `scheduler://`
+  - Projects: `projects://` (also `project://` for single-project info)
   - Dataflow: `dataflow://`
   - VM: `vm://zone/instance-name`
   - Cost/Billing: `cost://` (queries BigQuery billing export)
@@ -39,7 +40,8 @@ After implementing any feature, bug fix, or change, **always update this CLAUDE.
 - Cloud SQL: list/info instances, start/stop/delete, list databases
 - Load Balancers: list URL maps, forwarding rules, backend services
 - Certificate Manager: list certificates, certificate maps, map entries
-- Projects: list accessible GCP projects with filtering
+- Cloud Scheduler: list jobs with status/schedule/next+last run, detailed info, pause (disable) and resume (enable) jobs
+- Projects: list accessible GCP projects with filtering; `cio info project://id` shows number, parent, labels
 - Cost/Billing: query BigQuery billing export for cost breakdowns by service, project, or day
 - YAML configuration with environment variable expansion
 - Google Application Default Credentials (ADC) authentication
@@ -193,7 +195,7 @@ graph TB
   - `Type()` - resource type
 - **Capability interfaces** for operations only some types support. Callers
   type-assert to these instead of calling a method half the types stub out:
-  - `Removable` - `Remove()` (GCS, BigQuery, Cloud Run, VM, Pub/Sub, Cloud SQL)
+  - `Removable` - `Remove()` (GCS, BigQuery, Cloud Run, VM, Pub/Sub, Cloud SQL, Projects)
   - `Infoable` - `Info()` (BigQuery, IAM)
   - `ProjectInfoable` - `InfoWithProject()` when info needs an explicit project (Pub/Sub, Cloud SQL)
   - `Cancelable` - `Cancel()` (Cloud Run job executions)
@@ -354,6 +356,14 @@ graph TB
 **4. CLI Commands (`internal/cli/`)**
 - **root.go**: Global flags (`--config`, `--project`, `--region`, `--verbose`)
   - `PersistentPreRunE` loads config and overrides with CLI flags
+- **help.go**: Per-scheme help topics (`cio help <scheme>://`)
+  - Replaces cobra's default help command via `rootCmd.SetHelpCommand`; falls back
+    to normal command help when the argument isn't a scheme
+  - `schemeHelpTopics` table: one entry per scheme (paths, supported commands +
+    flags, copy-pasteable examples) — **add a topic here when adding a scheme**
+  - `cio help cost://` (also accepts `cost:/`, `cost:`, `cost`), `cio help schemes`
+    lists all topics, unknown topics print the scheme list
+  - `project` is an alias of the `projects://` topic
 - **map.go**: Manage alias mappings (`map <alias> <path>`, `map list`, `map show`, `map delete`)
   - Aliases created without `:` but used with it
 - **ls.go**: List GCS objects, BigQuery datasets/tables, IAM, Cloud Run, Dataflow, VMs, or costs
@@ -383,7 +393,8 @@ graph TB
   - Download: `cio cp :am/file.txt ./local/`
   - Wildcard download: `cio cp ':am/logs/*.log' ./local/`
   - Messages show alias paths: `Uploaded: file.txt → :am/path/file.txt`
-- **rm.go**: Remove GCS objects, BigQuery tables/datasets, Cloud Run executions, or VMs
+- **rm.go**: Remove GCS objects, BigQuery tables/datasets, Cloud Run executions, VMs, or projects
+  - Projects: `cio rm project://my-project-id`, wildcards `cio rm 'projects://staging-*'` (soft delete, ~30-day recovery)
   - GCS wildcards: `cio rm ':am/temp/*.tmp'`
   - BigQuery tables: `cio rm :mydata.events`
   - BigQuery wildcards: `cio rm ':mydata.temp_*'`
@@ -404,12 +415,14 @@ graph TB
   - Example: `cio scale worker://pool-name 3`
   - Scale to zero: `cio scale worker://pool-name 0`
   - Uses `UpdateWorkerPool` API with `scaling.manual_instance_count`
-- **start.go**: Start stopped Cloud SQL instances (`cio start`)
+- **start.go**: Start Cloud SQL instances or enable Cloud Scheduler jobs (`cio start`, aliases: `enable`, `resume`)
   - Start single or multiple instances: `cio start 'sql://staging-*'`
+  - Enable (resume) scheduler jobs: `cio enable scheduler://my-job`, `cio start 'scheduler://nightly-*'`
   - Parallel start with confirmation
-- **stop.go**: Stop VM or Cloud SQL instances (`cio stop`)
+- **stop.go**: Stop VM/Cloud SQL instances or disable Cloud Scheduler jobs (`cio stop`, aliases: `disable`, `pause`)
   - VM: `cio stop 'vm://*/bastion-*'`
   - Cloud SQL: `cio stop sql://my-instance`
+  - Cloud Scheduler: `cio disable scheduler://my-job` (pauses the job; skips already-paused)
   - Stops running instances in parallel, skips already-stopped ones
   - Discover mode: `cio stop 'vm:/iom-*/bast*'`
   - Force flag (`-f`) to skip confirmation
@@ -712,6 +725,17 @@ cio cp -j 1 --verbose gs://bucket/large.zip /tmp/
 
 ## Usage Examples
 
+### Per-Scheme Help
+```bash
+# List all resource schemes with one-line summaries
+cio help schemes
+
+# Commands, flags, and examples for a resource type
+cio help cost://
+cio help vm://
+cio help scheduler://    # bare name works too: cio help scheduler
+```
+
 ### GCS Examples
 ```bash
 # List all buckets in a project
@@ -919,6 +943,45 @@ cio ls -l certs://maps/my-cert-map/entries
 cio ls 'certs://prod-*'
 ```
 
+### Cloud Scheduler Examples
+```bash
+# List jobs (region from config/--region; jobs are regional)
+cio ls scheduler://
+
+# Long format: state, schedule, timezone, next run, last run, target
+cio ls -l scheduler://
+
+# Wildcard pattern
+cio ls 'scheduler://nightly-*'
+
+# Only enabled (active) jobs
+cio ls --active scheduler://
+
+# Detailed job status (schedule, target, retries, deadline, last attempt)
+cio info scheduler://my-job
+
+# Disable (pause) a job — 'disable'/'pause' are aliases of stop
+cio stop scheduler://my-job
+cio disable scheduler://my-job
+cio disable 'scheduler://nightly-*'
+
+# Enable (resume) a job — 'enable'/'resume' are aliases of start
+cio start scheduler://my-job
+cio enable scheduler://my-job
+
+# Force without confirmation
+cio disable -f scheduler://my-job
+
+# Discover mode: disable/enable jobs across projects matching a pattern
+cio disable 'scheduler:/iom-data*/'
+cio enable 'scheduler:/iom-data*/nightly-*'
+```
+
+**Notes:**
+- Uses `google.golang.org/api/cloudscheduler/v1` (REST); client is a `gclient.Provider` singleton in `scheduler/`
+- Jobs are regional: listing uses `--region`/`defaults.region`; the factory carries the default region (`Factory.Region`) so `info` can resolve it
+- Pause only acts on `ENABLED` jobs, resume only on `PAUSED` jobs — others are skipped with a notice
+
 ### Projects Examples
 ```bash
 # List all accessible projects
@@ -929,6 +992,23 @@ cio ls -l projects://
 
 # Filter by pattern
 cio ls -l 'projects://iom-*'
+
+# project:// (singular) is an alias for the same scheme
+cio ls 'project://iom-*'
+
+# Examine a single project: number, state, parent, labels, timestamps
+cio info project://my-project-id
+cio info --json project://my-project-id
+
+# Delete a project (soft delete: shuts down immediately, purged after ~30 days,
+# recoverable until then via UndeleteProject). Confirms before deleting.
+cio rm project://my-project-id
+
+# Delete projects matching a pattern (lists matches, asks for confirmation)
+cio rm 'projects://staging-*'
+
+# Force delete without confirmation
+cio rm -f project://my-project-id
 ```
 
 ### Cost/Billing Examples
@@ -1019,6 +1099,10 @@ cio rm 'vm:/iom-*/staging-*'
 
 # Stop VMs across projects
 cio stop 'vm:/iom-*/bast*'
+
+# Disable/enable Cloud Scheduler jobs across projects
+cio disable 'scheduler:/iom-data*/'
+cio enable 'scheduler:/iom-data*/'
 
 # Cancel Cloud Run job executions across projects
 cio cancel 'jobs:/iom-*/sqlmesh*/*'
